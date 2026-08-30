@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Backstop for the .githooks/commit-msg hook, which cannot run on commits made
+  # with --no-verify, through the GitHub web UI, or in a clone where nobody ran
+  # `git config core.hooksPath .githooks`.
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Reject attribution references in commit messages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Same pattern file the local hook reads, so the two cannot drift.
+          patterns_file=.githooks/forbidden-patterns.txt
+          if [ ! -f "$patterns_file" ]; then
+            echo "::error::$patterns_file is missing; refusing to run unguarded."
+            exit 1
+          fi
+          FORBIDDEN="$(cat "$patterns_file")"
+
+          failed=0
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            msg="$(git log -1 --format=%B "$sha")"
+            if printf '%s' "$msg" | grep -qiE "$FORBIDDEN"; then
+              subject="$(git log -1 --format='%s' "$sha")"
+              echo "::error::Commit ${sha} references AI tooling or adds an attribution trailer: ${subject}"
+              failed=1
+            fi
+          done < <(git rev-list "$BASE..$HEAD")
+
+          if [ "$failed" -ne 0 ]; then
+            echo "Rewrite the offending messages to describe the change only, then force-push."
+          else
+            echo "All commit messages clean."
+          fi
+          exit $failed
+
+  verify:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build
+        run: npm run build
+
+  golden:
+    name: Golden and browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # Reference images are generated with SwiftShader, so the browser version
+      # is part of the expected output. Cache on the resolved Playwright version.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:golden
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

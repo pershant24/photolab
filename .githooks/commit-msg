@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+msg_file="$1"
+
+# The pattern lives in one file, read by both this hook and the commit-message
+# job in .github/workflows/ci.yml, so the two cannot drift apart.
+patterns_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forbidden-patterns.txt"
+
+if [[ ! -f "$patterns_file" ]]; then
+  echo "commit-msg hook: $patterns_file is missing; refusing to run unguarded." >&2
+  exit 1
+fi
+
+FORBIDDEN="$(cat "$patterns_file")"
+
+# Check only the text the commit will actually carry. `git commit -v` appends a
+# scissors block containing the diff, which legitimately contains these words
+# when this hook itself is being edited; `#` lines are comments git discards.
+msg_body="$(sed '/^#.*>8/,$d' "$msg_file" | git stripspace --strip-comments)"
+
+if grep -qiE "$FORBIDDEN" <<<"$msg_body"; then
+  echo "" >&2
+  echo "commit-msg hook: commit blocked." >&2
+  echo "" >&2
+  echo "This message references AI tooling or adds an attribution trailer." >&2
+  echo "Rewrite it to describe the change only." >&2
+  echo "" >&2
+  exit 1
+fi

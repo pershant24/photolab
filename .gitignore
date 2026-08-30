@@ -1,0 +1,17 @@
+# Directory patterns are anchored to the repository root. An unanchored
+# `dist/` would also match `src/render/dist/` and silently exclude source.
+/node_modules/
+/dist/
+/coverage/
+/playwright-report/
+/blob-report/
+/test-results/
+/.vite/
+/tests/golden/__diff__/
+
+# These are intentionally unanchored: they match at any depth.
+.DS_Store
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
