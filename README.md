@@ -44,8 +44,8 @@ order the phenomena physically occur — scene, then lens, then film, then grade
 then display — in an ACEScg working space at RGBA16F precision.
 
 - `docs/COLOUR_PIPELINE.md` — the pass order and why it is that order
-- `docs/ARCHITECTURE.md` — module layout and the recipe for adding a pass
-- `docs/SHADER_CONVENTIONS.md` — uniform conventions and the resolution-independence rule
+- `docs/ARCHITECTURE.md` — module layout and the recipe for adding a pass *(lands with the render graph)*
+- `docs/SHADER_CONVENTIONS.md` — uniform conventions and the resolution-independence rule *(lands with the first shader passes)*
 - `CLAUDE.md` — project rules, including the commit attribution constraint
 
 ## Rendering notes
