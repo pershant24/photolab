@@ -26,6 +26,32 @@ export const STAGES = ['ingest', 'scene', 'lens', 'film', 'grade', 'display'] as
 export type Stage = (typeof STAGES)[number]
 
 /**
+ * The image being edited: the `sourceImage` half of
+ * `render(sourceImage, EditState)`.
+ *
+ * Kept as its own argument rather than folded into {@link RenderState}, because
+ * it is not a parameter and will never belong in `EditState`. `EditState` has to
+ * be flat, serialisable and snapshot-able for undo; a GPU texture is none of
+ * those.
+ *
+ * `pattern` is the generated pattern from Part B. It remains after image loading
+ * lands, because it is what the agreement tests measure and it needs no fixture
+ * file to exist.
+ */
+export type RenderSource =
+  | { readonly kind: 'pattern' }
+  | {
+      readonly kind: 'image'
+      readonly texture: WebGLTexture
+      /** Proxy dimensions — what was actually uploaded. */
+      readonly width: number
+      readonly height: number
+      /** True source dimensions, orientation-corrected. Drives `uImageSize`. */
+      readonly sourceWidth: number
+      readonly sourceHeight: number
+    }
+
+/**
  * Placeholder editor state for the plumbing.
  *
  * `EditState` proper lands in `src/core/state/` with the first real adjustment.
@@ -84,7 +110,7 @@ export interface Pass {
   variantKey(state: RenderState): string
 
   /** Whether this pass runs at all. Changing this changes the graph structure. */
-  enabled(state: RenderState): boolean
+  enabled(state: RenderState, source: RenderSource): boolean
 
   /**
    * Bind everything beyond the four contract uniforms, which the graph has
@@ -96,6 +122,7 @@ export interface Pass {
     locate: (name: string) => WebGLUniformLocation | null,
     state: RenderState,
     context: PassContext,
+    source: RenderSource,
   ): void
 }
 

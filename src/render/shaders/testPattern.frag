@@ -8,9 +8,9 @@
 
 precision highp float;
 
-#define PATCH_COUNT 16
-#define PATCH_GRID 4.0
-#define RAMP_HEIGHT 0.25
+#define PATCH_COUNT 25
+#define PATCH_GRID 5.0
+#define RAMP_HEIGHT 0.2
 
 uniform vec2 uResolution;
 uniform vec2 uImageSize;

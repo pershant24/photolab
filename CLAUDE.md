@@ -75,6 +75,12 @@ No hidden state. No buffers accumulated across frames. No parameter read from
 anywhere but `EditState`. Given the same image and the same `EditState`, the
 output is identical, at any resolution, in preview or in export.
 
+One recorded deviation, in the *input* rather than in the renderer: the
+interactive proxy is produced by resize-at-decode, which downsamples encoded
+8-bit data rather than linear light, so preview and export are not bit-identical
+in fine detail. `docs/ARCHITECTURE.md` §4 carries the reasoning and why the
+correct alternative is worse.
+
 This is what makes the golden tests, the two-resolution invariant test, and
 undo-as-snapshots all work. Everything below follows from it.
 

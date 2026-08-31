@@ -199,53 +199,114 @@ byte-stable for golden comparisons.
 
 `src/core/colour/` is the reference implementation. When a function is
 transliterated into GLSL, a test must assert the two agree across a value ramp —
-comparing the shader against the TypeScript, never against itself.
+comparing the shader against the TypeScript, never against itself. A test that
+renders a shader and compares it to a previous render of the same shader
+measures that the shader is deterministic, which was never in doubt.
 
-The reason is stated in [`ARCHITECTURE.md`](ARCHITECTURE.md) §7 and is worth
-repeating: a test that renders a shader and compares it to a previous render of
-the same shader measures that the shader is deterministic, which was never in
-doubt. Only an independent implementation can disagree usefully.
+That much is obvious. The rest of this section is not, and every claim in it was
+measured rather than reasoned about.
 
-### Assert on an intermediate buffer, not on the canvas
+### Compare leg by leg. A round trip cannot see the likeliest defect at all.
 
-The obvious form of this test — render to the canvas, check the pixels — is far
-weaker than it looks, and this was measured rather than reasoned about.
+The pipeline applies `SRGB_TO_ACESCG` at ingest and `ACESCG_TO_SRGB` at display.
+So an end-to-end assertion — render, read the canvas, compare against the
+original input — is measuring a **round trip**, and a round trip has a blind spot
+that is not a matter of tolerance.
 
-The chain applies `SRGB_TO_ACESCG` at ingest and `ACESCG_TO_SRGB` at display, so
-end to end it is a **round trip**, and an error in either matrix very largely
-cancels in the result. Perturbing one forward coefficient by 1% moved the canvas
-by at most **one 8-bit code value**, and by nothing at all on every saturated
-patch, because the display clamp removes the residual exactly where it is
-largest. A canvas-only test passed that mutation.
+Both GLSL matrix literals are produced by one generator from one convention.
+GLSL's `mat3()` constructor fills columns while the TypeScript stores rows, so
+the realistic mistake is getting that backwards **once**, which transposes both.
+And then:
 
-The same 1% error moves the ACEScg intermediate by 0.0093, about nineteen times
-the half-float noise floor. Reading the ingest pass's output directly catches it,
-and catches a 0.1% error too. `RenderGraph.render` takes an `onPassComplete`
-hook for exactly this: it fires while each pass's target is still bound, which is
-the only moment its contents can be read.
+```
+Mᵀ · (M⁻¹)ᵀ  =  (M⁻¹ · M)ᵀ  =  Iᵀ  =  I
+```
 
-Keep the canvas assertion as well. It is the only thing covering the display
-matrix, the clamp and the encode, which the intermediate never reaches. Neither
-subsumes the other.
+Exactly the identity. Measured: 4.4e-16 deviation, and **zero** 8-bit code
+values of movement on the canvas. Not approximately invisible — algebraically
+invisible, at any tolerance, forever.
 
-### Practical requirements
+The fix is to split the chain and derive each leg's expectation from what was
+**measured at the previous stage**, not from the original input:
 
-- **Read an RGBA16F intermediate as `HALF_FLOAT`** and decode in JavaScript.
-  `IMPLEMENTATION_COLOR_READ_TYPE` on such a framebuffer is `HALF_FLOAT`, so
-  `readPixels` will not portably return `UNSIGNED_BYTE` from one. Resolving
-  through an RGBA8 target instead — which is what *tiled export* must do — would
-  clamp precisely the out-of-range values a colour test most wants to see.
-- **Derive the tolerance**, rather than raising it until the test passes. For a
-  half-float intermediate that is the 2^-11 relative precision of the format
-  plus an absolute floor for channels that cancel to near zero; for an 8-bit
-  canvas it is the code-value rounding. A tolerance arrived at by loosening is a
-  tolerance that no longer detects anything.
-- **Prove the tolerance has margin** by perturbing a coefficient and confirming
-  the test fails. A tolerance nobody has tested against a real error is a guess.
-- **Report which patch failed and the per-channel delta.** "0.3% of pixels
-  differ" does not survive contact with a real debugging session.
+| | Compares | Pins |
+|---|---|---|
+| **Leg 1** | measured ACEScg intermediate against `TS_ingest(encoded_in)` | `SRGB_TO_ACESCG` |
+| **Leg 2** | measured display output against `TS_display(acescg_measured)` | `ACESCG_TO_SRGB` |
 
----
+Passing the original input to leg 2 rather than the measured intermediate
+reconstitutes the round trip and hands the cancellation straight back. This is
+the single most important line in the harness.
+
+`RenderGraph.render` provides the two hooks this needs: `onPassComplete`, which
+fires while each pass's target is still bound, and `finalTarget`, which sends the
+last pass into a buffer instead of the canvas.
+
+Verified by mutation, in `tests/render/agreement.spec.ts`. Each leg fails when
+its own matrix is wrong and only then, which is what makes a failure diagnostic
+rather than merely alarming:
+
+| Mutation | Leg 1 | Leg 2 | Canvas |
+|---|---|---|---|
+| Both matrices transposed *(the realistic generator defect)* | fails | fails | **passes** |
+| Display matrix transposed | passes | fails | fails |
+| Ingest matrix, one coefficient +0.1% | fails | passes | **passes** |
+| Display matrix, one coefficient +0.1% | passes | fails | fails |
+
+### Read a half-float buffer, not the canvas
+
+8-bit output quantises at 1/255 = 3.9e-3, and a 0.1% coefficient error falls
+under that on most patches. Rendering the pass under test into an RGBA16F target
+resolves 4.9e-4 instead, about eight times finer, which is what puts 0.1% inside
+reach.
+
+`IMPLEMENTATION_COLOR_READ_TYPE` on an RGBA16F framebuffer is `HALF_FLOAT`, so
+read as half float and decode in JavaScript. Do **not** resolve through an RGBA8
+target — that is what *tiled export* must do, and it would clamp exactly the
+out-of-range values a colour test most wants to see.
+
+### Do not restrict to in-gamut midtones
+
+The obvious way to stop the display clamp eating the signal is to assert only on
+patches that sit comfortably inside gamut. It is the wrong move, and it costs an
+order of magnitude.
+
+A display-matrix error shows up most strongly on **saturated** patches, where a
+channel sits near zero and the encoding curve is at its steepest. Measured on
+midtones alone, a 1% error moved the result by 2 code values and a 0.1% error by
+**none at all**; across the full patch set the same errors moved it by 19 and 2.
+
+Keep every patch and skip only the individual **channels** whose expected value
+clamps. Whether a channel clamps is decidable from the measured intermediate, so
+it is a principled exclusion rather than a tuned one. Assert that a useful number
+of channels survived the filter, or a bug in the clamp detection leaves the test
+green while comparing nothing.
+
+### Derive the tolerance from the terms, not from the result
+
+A bound proportional to the expected value is zero for a channel that **cancels**,
+and the out-of-gamut patches contain one: a red channel that is the sum of terms
+of magnitude 0.25 coming to exactly zero. Each term carries its own half-float
+quantisation error, those errors add rather than cancelling along with the terms,
+and the residual is 2.8e-4 against an expected value of 0. No absolute floor
+picked without looking at the terms is defensible there.
+
+So scale the bound by the sum of the absolute contributions to the dot product —
+the standard error-propagation bound — or by the result's own magnitude where
+that dominates. When a tolerance has to cross an encoding curve, carry it through
+the curve's slope; the sRGB OETF's slope is 12.92 near black and 0.44 near white,
+so a single bound cannot be right at both ends.
+
+### And prove the tolerance has margin
+
+A tolerance nobody has tested against a real error is a guess. Perturb a
+coefficient, confirm the test fails, and record the smallest error it catches.
+
+### Report which patch failed and the per-channel delta
+
+"0.3% of pixels differ" does not survive contact with a real debugging session.
+Name the patch, the channel, the expected value, what was measured, and the
+delta.
 
 ## 5. Context and precision
 

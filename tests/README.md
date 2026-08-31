@@ -66,8 +66,19 @@ result recorded. Three that changed the design rather than confirming it:
   moves the rendered canvas by at most one 8-bit code value, and not at all on
   saturated patches, because the pipeline round-trips through the inverse matrix
   and the display clamp removes what is left. The canvas assertion passed the
-  mutation. Reading the ACEScg intermediate instead catches 1% and 0.1% alike;
-  see `tests/render/plumbing.spec.ts`.
+  mutation. Reading the ACEScg intermediate instead catches 1% and 0.1% alike.
+- Worse: transposing **both** GLSL matrices, which is the realistic defect since
+  one generator emits both, leaves the round trip at exactly the identity —
+  4.4e-16 deviation, zero code values of movement. Not a tolerance problem, an
+  algebraic one. The agreement test is therefore split into two legs, each
+  comparing against what was measured at the previous stage rather than against
+  the original input. See `tests/render/agreement.spec.ts` and
+  `docs/SHADER_CONVENTIONS.md` §4, which carries the full mutation table.
+- Restricting that test to in-gamut midtones, which is the obvious way to stop
+  the display clamp eating the signal, was measured to cost an order of
+  magnitude of sensitivity: a 0.1% error became undetectable. Display-matrix
+  errors are largest on saturated patches, where a channel sits near zero and the
+  encoding curve is steepest.
 
 The pattern is the same each time: an assertion that looks like it covers
 something can be blind to it, and running the mutation is the only way to find

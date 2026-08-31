@@ -83,10 +83,11 @@ Working space is **ACEScg** (AP1 primaries, linear); intermediates are
 halation sits before the characteristic curves, why grain sits after them — is
 in [`COLOUR_PIPELINE.md`](COLOUR_PIPELINE.md) and is not repeated here.
 
-`src/render/graph.ts` — which lands with the render graph, not yet on disk —
-encodes this order structurally, with insertion points for every stage present
-from the start even while most are empty. Registering a new pass means placing it
-at its physical position, never appending it.
+`src/render/graph.ts` encodes this order structurally, with insertion points for
+every stage present from the start even while most are empty. Registering a new
+pass means placing it at its physical position, never appending it — the graph
+sorts by `STAGES` rather than by registration order, so appending is not
+something a pass can do by accident.
 
 ---
 
@@ -108,6 +109,26 @@ which drops the WebGL context. The interactive path renders a proxy at about
 2048px on the long edge, drops to a smaller one during an active pointer drag,
 and restores on pointer-up. Export runs the identical pass chain over the full
 image in overlapping tiles.
+
+The proxy is produced by `createImageBitmap`'s `resizeWidth` / `resizeHeight`
+during decode, which also means the full-resolution texture is never created —
+so a 9500px source is fine on a device whose `MAX_TEXTURE_SIZE` is 8192, which is
+most integrated and mobile GPUs.
+
+**A recorded deviation from preview-export parity.** `resizeQuality: 'high'`
+downsamples the **encoded** 8-bit data, not linear light. Averaging
+gamma-encoded values is not averaging the light they represent: it under-weights
+the brighter samples, so fine high-frequency detail comes out slightly darker
+than a linear-light downscale would give. **Preview and export will therefore not
+be bit-identical in fine detail.**
+
+This is accepted rather than fixed. It is what essentially every decoder and
+browser does, the error is confined to detail near the resolution limit, and the
+alternative is worse: decoding at full resolution and downscaling on the GPU in
+linear light would be correct, and would reintroduce exactly the
+`MAX_TEXTURE_SIZE` problem the proxy decode exists to avoid. It is written down
+here so that it is a decision rather than a surprise when export lands at
+Stage 5.
 
 **Every spatial parameter is normalised against image dimensions.** Grain size,
 blur radius, aberration offset, vignette falloff. A radius expressed in pixels
@@ -248,8 +269,10 @@ against the author, not a dependency graph.
 
 ## 11. Adding a pass
 
-The recipe. Concrete paths under `src/render/` land with the render graph; the
-rules below are what that graph is built to enforce.
+The recipe, and what `src/render/graph.ts` is built to enforce. The vignette
+below is an **illustration**, not a description of existing code: it walks a pass
+that has not been written through every step, and the files it names do not exist
+yet. Lens effects arrive last, per the build order above.
 
 1. **Add the parameters to `EditState`** in `src/core/state/`, with defaults.
    Plain serialisable values only — they have to survive a snapshot for undo and

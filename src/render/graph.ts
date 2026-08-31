@@ -21,7 +21,7 @@ import { ProgramCache } from './gl/program'
 import type { FullScreenQuad } from './gl/quad'
 import { createFullScreenQuad } from './gl/quad'
 import quadVertexSource from './shaders/quad.vert'
-import type { Pass, PassContext, RenderState } from './passes/types'
+import type { Pass, PassContext, RenderSource, RenderState } from './passes/types'
 import { STAGES } from './passes/types'
 
 export class RenderGraphError extends Error {
@@ -99,6 +99,18 @@ function assertIsotropic(context: PassContext, passId: string): void {
  */
 export interface RenderOptions {
   onPassComplete?: (passId: string, target: RenderTarget | null) => void
+
+  /**
+   * Draw the final pass into this target instead of the canvas.
+   *
+   * This is the primitive tiled export is built on — render the chain into a
+   * target and read it back — arriving early because the agreement test needs
+   * the same thing. Reading the display pass's output at half-float precision
+   * rather than as 8-bit canvas pixels raises the smallest detectable error by
+   * about a factor of eight: 1/255 is 3.9e-3, while half float resolves 4.9e-4.
+   * A 0.1% error in a display matrix coefficient sits between those two.
+   */
+  finalTarget?: RenderTarget
 }
 
 export class RenderGraph {
@@ -138,18 +150,45 @@ export class RenderGraph {
   }
 
   /**
+   * The buffer pool, so a caller can obtain a `finalTarget` of the right size and
+   * format rather than allocating a second, differently-configured one.
+   */
+  get pool(): TargetPool {
+    return this.#pool
+  }
+
+  /**
    * Render one frame into the canvas.
+   *
+   * `source` is separate from `state` on purpose: it is the `sourceImage` half
+   * of `render(sourceImage, EditState)`, and a GPU texture can never live in an
+   * `EditState` that has to stay flat, serialisable and snapshot-able for undo.
    *
    * The chain ping-pongs between two pooled targets; the last enabled pass draws
    * straight to the default framebuffer rather than into a target that would
    * then have to be blitted.
    */
-  render(state: RenderState, context: PassContext, options: RenderOptions = {}): void {
+  render(
+    source: RenderSource,
+    state: RenderState,
+    context: PassContext,
+    options: RenderOptions = {},
+  ): void {
     const { gl } = this.#context
     if (this.#context.status() === 'lost') return
 
-    const active = this.#passes.filter((pass) => pass.enabled(state))
+    const active = this.#passes.filter((pass) => pass.enabled(state, source))
     if (active.length === 0) return
+
+    // Checked per frame, not once at construction: which source pass is enabled
+    // depends on the source, so a state with no source enabled would otherwise
+    // put `ingest` first, and it would fail obscurely on an unbound uSource.
+    if (!active[0]?.isSource) {
+      throw new RenderGraphError(
+        `the first enabled pass is "${active[0]?.id ?? '(none)'}", which is not a source pass; ` +
+          `nothing before it has produced an input to read`,
+      )
+    }
 
     const [width, height] = context.resolution
     this.#quad.bind()
@@ -163,7 +202,7 @@ export class RenderGraph {
 
       assertIsotropic(context, pass.id)
 
-      const output = isLast ? null : this.#pool.acquire(width, height)
+      const output = isLast ? (options.finalTarget ?? null) : this.#pool.acquire(width, height)
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, output ? output.framebuffer : null)
       gl.viewport(0, 0, width, height)
@@ -176,7 +215,7 @@ export class RenderGraph {
       gl.useProgram(compiled.program)
 
       this.#bindContractUniforms(compiled.uniformLocation.bind(compiled), context, input, pass)
-      pass.bindUniforms(gl, compiled.uniformLocation.bind(compiled), state, context)
+      pass.bindUniforms(gl, compiled.uniformLocation.bind(compiled), state, context, source)
 
       this.#quad.draw()
 
@@ -187,7 +226,8 @@ export class RenderGraph {
 
       // Released only after the draw that reads it has been issued.
       if (input) this.#pool.release(input)
-      input = output
+      // A caller-supplied final target is not the pool's to hand back.
+      input = output === options.finalTarget ? null : output
     }
 
     if (input) this.#pool.release(input)
