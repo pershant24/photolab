@@ -25,8 +25,18 @@ FORBIDDEN="$(cat "$patterns_file")"
 # than an editor. All four cases were verified against git 2.50 rather than
 # assumed. Comment removal itself is delegated to `git stripspace`, so it honours
 # core.commentChar instead of reimplementing git's rules with a regex.
-cleanup="$(git config --get commit.cleanup || true)"
-[[ -n "$cleanup" ]] || cleanup=default
+# The message source alone is not enough: it says how the message was supplied,
+# while `commit.cleanup` decides whether comments survive. Combine them into the
+# effective cleanup mode, then strip only for `strip`, which is the sole mode
+# that removes comment lines.
+#
+#   explicitly configured -> that mode governs, whatever the source
+#   unset or `default`    -> `strip` when edited, `whitespace` otherwise
+#
+# Note that `scissors` does NOT remove comment lines. It is `whitespace` plus
+# truncation at the marker, so classifying it as comment-stripping would miss a
+# forbidden word on a `#` line that git genuinely stores.
+cleanup_config="$(git config --get commit.cleanup || true)"
 
 source_path="$(git rev-parse --git-path photolab-commit-source 2>/dev/null || true)"
 msg_source=""
@@ -35,27 +45,30 @@ if [[ -n "$source_path" && -f "$source_path" ]]; then
   rm -f "$source_path"
 fi
 
-case "$cleanup" in
-  verbatim | whitespace)
-    strip_comments=0
-    ;;
-  strip | scissors)
-    strip_comments=1
-    ;;
-  *)
-    # `default`: git strips comments only when an editor was opened.
-    #
-    # `git commit -m ... -e` reports source "message" yet does open an editor,
-    # so this branch is conservative there and checks git's template too. That
-    # can only produce a false rejection, never a missed one, and the message
-    # names the offending line so the cause is obvious.
-    if [[ "$msg_source" == "message" ]]; then
-      strip_comments=0
-    else
-      strip_comments=1
-    fi
-    ;;
-esac
+if [[ -n "$cleanup_config" && "$cleanup_config" != "default" ]]; then
+  effective_cleanup="$cleanup_config"
+elif [[ "$msg_source" == "message" ]]; then
+  effective_cleanup="whitespace"
+else
+  effective_cleanup="strip"
+fi
+
+if [[ "$effective_cleanup" == "strip" ]]; then
+  strip_comments=1
+else
+  strip_comments=0
+fi
+
+# Two residual cases, both erring towards over-rejection rather than a miss:
+#
+#   `git commit -m ... -e` reports source "message" yet does open an editor, so
+#   the effective mode is computed as `whitespace` and git's status template is
+#   grepped along with the message. A commit touching CLAUDE.md is rejected.
+#
+#   `git commit -e --cleanup=whitespace` passed on the command line is invisible
+#   here: git gives hooks no argv, and the config read returns nothing. This is
+#   irreducible locally. The push-event CI check covers it, because that greps
+#   the stored message regardless of how it came to exist.
 
 comment_char="$(git config --get core.commentChar || true)"
 [[ -n "$comment_char" && "$comment_char" != "auto" ]] || comment_char='#'

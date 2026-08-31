@@ -24,26 +24,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Load the forbidden pattern from origin/main
+      - name: Load the forbidden pattern from the base branch
+        env:
+          # The branch a pull request targets, or the default branch on a push.
+          # Not a literal "main", so a rename of the default branch or a pull
+          # request against a long-lived branch does not silently read the wrong
+          # file or fail to find one.
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.event.repository.default_branch }}
         run: |
           set -euo pipefail
 
-          # Read the pattern from main, never from the ref under test. Reading it
-          # from the checked out ref would let a pull request that edits the
-          # pattern file weaken the very check validating that pull request.
-          # A change to the pattern takes effect once it is merged to main.
+          # Read the pattern from the base branch, never from the ref under test.
+          # Reading it from the checked out ref would let a pull request that
+          # edits the pattern file weaken the very check validating that pull
+          # request. A pattern change therefore takes effect one merge after it
+          # lands, validated against the previous version. That is intended.
+          #
           # Deliberately not --depth=1: a shallow fetch grafts this repository's
-          # history, which makes the previous push tip unreachable in the next
-          # step and silently degrades the range check to the tip commit only.
-          git fetch --no-tags origin main
+          # history, which makes the previous push tip unreachable in the commit
+          # message step. That defect silently degraded the range check to the
+          # tip commit only on every push to the default branch.
+          echo "Base ref: ${BASE_REF}"
+          git fetch --no-tags origin "$BASE_REF"
 
           if ! git cat-file -e FETCH_HEAD:.githooks/forbidden-patterns.txt 2>/dev/null; then
-            echo "::error::.githooks/forbidden-patterns.txt is missing on origin/main; refusing to run unguarded."
+            echo "::error::.githooks/forbidden-patterns.txt is missing on ${BASE_REF}; refusing to run unguarded."
             exit 1
           fi
 
           git show FETCH_HEAD:.githooks/forbidden-patterns.txt > "$RUNNER_TEMP/forbidden.txt"
-          echo "Pattern in force (from origin/main): $(cat "$RUNNER_TEMP/forbidden.txt")"
+          echo "Pattern in force (from ${BASE_REF}): $(cat "$RUNNER_TEMP/forbidden.txt")"
 
       - name: Check ref name
         env:
@@ -83,24 +93,40 @@ jobs:
             fi
             before="${PUSH_BEFORE:-}"
 
-            # `before` is unusable in two cases: branch creation, where it is all
-            # zeros, and a force push, where it may not be an ancestor of `after`
-            # and so does not form a valid range. Test both rather than assume.
-            usable=0
-            if [ -n "$before" ] && [ "$before" != "$ZERO" ] \
-              && git cat-file -e "${before}^{commit}" 2>/dev/null \
-              && git merge-base --is-ancestor "$before" "$after" 2>/dev/null; then
-              usable=1
-            fi
+            # Three distinct conditions with three different correct responses.
+            # They were previously collapsed into one fallback, which is how a
+            # misconfigured fetch was able to masquerade as a force push and
+            # silently reduce every range to a tip-only check.
+            if [ -z "$before" ] || [ "$before" = "$ZERO" ]; then
+              # Branch creation. There is no previous tip to range from.
+              echo "Case: branch creation. Checking only ${after}."
+              revs="$(git rev-list -n 1 "$after")"
 
-            if [ "$usable" -eq 1 ]; then
-              revs="$(git rev-list "${before}..${after}")"
-              echo "Push: checking ${before}..${after}"
+            elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              # Not a fallback. With fetch-depth: 0 every reachable commit is
+              # present, so a missing previous tip means the checkout or a fetch
+              # in this job has shallowed the repository. Falling back here would
+              # leave every commit below the tip unchecked while reporting green.
+              echo "::error::Previous tip ${before} is not in the object store."
+              echo "This is a configuration fault, not a force push. With fetch-depth: 0 the"
+              echo "commit must be present, so either actions/checkout is not fetching full"
+              echo "history or a --depth fetch in this job has grafted it."
+              echo "Refusing to degrade to a tip-only check, which would silently leave the"
+              echo "rest of this push unexamined."
+              exit 1
+
+            elif ! git merge-base --is-ancestor "$before" "$after" 2>/dev/null; then
+              # Genuine force push: the previous tip is present but was rewritten
+              # away, so ${before}..${after} is not a meaningful range.
+              echo "Case: force push. ${before} is present but is not an ancestor of ${after}."
+              echo "Checking only ${after}."
+              revs="$(git rev-list -n 1 "$after")"
+
+            else
+              echo "Case: fast-forward push. Checking ${before}..${after}"
               echo "Note: commits already cleared on their pull request are re-checked here."
               echo "A failure on an apparently-green commit means it reached this branch unchecked."
-            else
-              revs="$(git rev-list -n 1 "$after")"
-              echo "Push: previous tip unusable (branch creation or force push); checking only ${after}"
+              revs="$(git rev-list "${before}..${after}")"
             fi
           fi
 
