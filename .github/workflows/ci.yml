@@ -22,7 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 1
+          # Must stay 0. The commit message step ranges from the previous push
+          # tip, and a shallow checkout makes that commit unreachable; the step
+          # now fails loudly rather than silently checking only the tip.
+          fetch-depth: 0
 
       - name: Load the forbidden pattern from the base branch
         env:
