@@ -47,6 +47,17 @@ that same pull request. A pattern change takes effect once merged.
 controls a separate `Claude-Session:` trailer containing a claude.ai link, which
 the other two fields do not suppress.
 
+### Known accepted residuals
+
+Reading the forbidden-pattern file from the default branch protects against
+tampering on a pull request, because the base ref predates the change. On a
+direct push to `main` there is no base ref and `origin/main` already includes
+the pushed commits, so a push that neuters the pattern file and adds a forbidden
+commit together would be checked against its own tampered pattern. The
+consistent fix is reading from `github.event.before` on pushes. Accepted, not
+built: `main` being unprotected is the root cause and resolves when the repo
+goes public, and the attack requires deliberate self-sabotage on a solo repo.
+
 Note that the hook pattern matches the bare word `claude`, case-insensitively.
 A commit message naming the file `CLAUDE.md` will therefore be rejected. This is
 a deliberate consequence of a guard with no exceptions: refer to it as "the

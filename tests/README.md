@@ -6,6 +6,44 @@
 | `tests/probe/` | Playwright | Capability probes. Assert the browser can do what the renderer assumes. |
 | `tests/golden/` | Playwright | Rendered output against committed reference images. |
 
+## Strategy
+
+**Colour maths is verified by numeric assertions against the pure TypeScript
+reference in `src/core/colour/`, not by image diffing.** Known patch colours go
+through the chain and the values that come out are compared numerically. Two
+reasons. It is far less sensitive to rasteriser backend differences than a pixel
+comparison, which matters because local and CI SwiftShader are different code
+generators (see below). And when it fails it names the colour that is wrong,
+where an image diff reports only that 0.3% of pixels differ.
+
+**Golden images are reserved for spatial effects** — grain, halation, vignette,
+bloom, distortion — where there is no small set of numbers that captures whether
+the result is right. They arrive at Milestone 3, and CI is the source of truth
+for the reference images.
+
+**Prefer assertions on ground-truth properties over comparisons to expected
+values sourced from documents.** A property that must hold given the definitions
+cannot inherit a wrong expectation, and published reference values disagree with
+each other more often than is comfortable. The worked example is in
+`tests/unit/matrices.test.ts`: every row of the sRGB to ACEScg matrix must sum to
+1, which is true exactly when white maps to white, which is true only if the
+chromatic adaptation is present and correctly oriented. That assertion is
+stronger than comparing against a published matrix, because published matrices
+vary in how many digits they carry and in whether and how they adapt.
+
+Comparisons against published values still earn their place, because a property
+about white points passes unchanged if a primary chromaticity is typo'd. Keep
+both, and when they disagree, **trust the property and investigate the published
+value.** That is not hypothetical: `tests/unit/primaries.test.ts` records a real
+6.6e-5 disagreement between two published sRGB matrices, caused by one deriving
+D65 from its chromaticity and the other using the ASTM tabulated white.
+
+**Where two independent derivations of the same quantity are cheap, do both and
+assert they agree.** `tests/unit/transfer.test.ts` derives the ACEScct slope
+constant from the log segment rather than trusting the transcribed value;
+`tests/unit/grade.test.ts` checks the contrast operator against a closed-form
+power law obtained without going through the encode and decode functions at all.
+
 ## Renderer baseline
 
 `tests/probe/webgl2-capability.spec.ts` records what the test browser actually
