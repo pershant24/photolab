@@ -26,7 +26,11 @@ Three layers enforce it, because each one alone is insufficient:
 | Hook | `.githooks/commit-msg` | Any message reaching `git commit` locally |
 | Hook | `.githooks/pre-push` | Branch and tag names, which `commit-msg` never sees |
 | CI | `.github/workflows/ci.yml` | Messages and branch names on both push and pull request: `--no-verify`, the web UI, squash-merge subjects composed in the merge dialog, server-side commits, and clones where nobody set `core.hooksPath` |
-| Branch protection | `main` ruleset | Removes the direct-push path to `main` rather than detecting it afterwards |
+| Branch protection | *unavailable* | Would remove the direct-push path to `main`, but GitHub refuses both rulesets and classic protection on a private repository on this plan (HTTP 403, "Upgrade to GitHub Pro or make this repository public"). Making the repository public would enable it, and is required for GitHub Pages anyway |
+
+Because `main` cannot be protected, **the CI check on the `push` event is the
+only backstop for a commit that reaches `main` without a pull request.** That is
+why the job runs on `push` and not only on `pull_request`.
 
 `.githooks/prepare-commit-msg` supports `commit-msg` rather than guarding
 anything itself: it records how git obtained the message, which is the only way
