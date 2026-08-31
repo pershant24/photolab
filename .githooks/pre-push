@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Branch names are a Git artifact like any other, and neither `commit-msg` (which
+# never sees the branch) nor the CI message check (which reads only messages)
+# covers them. This is the local half; the CI job checks `github.head_ref`.
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+patterns_file="$hook_dir/forbidden-patterns.txt"
+
+if [[ ! -f "$patterns_file" ]]; then
+  echo "pre-push hook: $patterns_file is missing; refusing to run unguarded." >&2
+  exit 1
+fi
+
+FORBIDDEN="$(cat "$patterns_file")"
+zero='0000000000000000000000000000000000000000'
+failed=0
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+while read -r local_ref local_sha remote_ref _remote_sha; do
+  [[ -n "${remote_ref:-}" ]] || continue
+  [[ "$local_sha" != "$zero" ]] || continue   # branch deletion carries no name to vet
+
+  # The remote name is the one that becomes a public artifact.
+  name="${remote_ref#refs/heads/}"
+  name="${name#refs/tags/}"
+
+  if printf '%s' "$name" | grep -qiE "$FORBIDDEN"; then
+    echo "" >&2
+    echo "pre-push hook: push blocked." >&2
+    echo "" >&2
+    echo "Ref name references AI tooling: $name" >&2
+    echo "  (pushing $local_ref -> $remote_ref)" >&2
+    echo "" >&2
+    echo "Rename the branch to describe the work only:" >&2
+    echo "    git branch -m <new-name>" >&2
+    echo "" >&2
+    failed=1
+  fi
+done
+
+exit "$failed"

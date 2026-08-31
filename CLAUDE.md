@@ -23,8 +23,21 @@ Three layers enforce it, because each one alone is insufficient:
 |---|---|---|
 | Setting | `.claude/settings.json` | The automatically appended trailer and the claude.ai session link |
 | This rule | `CLAUDE.md` | Text written into the message body, which the setting does not touch |
-| Hook | `.githooks/commit-msg` | Anything that reaches `git commit` regardless of origin |
-| CI | `.github/workflows/ci.yml` | Anything committed with `--no-verify` or through the GitHub web UI |
+| Hook | `.githooks/commit-msg` | Any message reaching `git commit` locally |
+| Hook | `.githooks/pre-push` | Branch and tag names, which `commit-msg` never sees |
+| CI | `.github/workflows/ci.yml` | Messages and branch names on both push and pull request: `--no-verify`, the web UI, squash-merge subjects composed in the merge dialog, server-side commits, and clones where nobody set `core.hooksPath` |
+| Branch protection | `main` ruleset | Removes the direct-push path to `main` rather than detecting it afterwards |
+
+`.githooks/prepare-commit-msg` supports `commit-msg` rather than guarding
+anything itself: it records how git obtained the message, which is the only way
+`commit-msg` can tell whether git will strip `#` comment lines. Under
+`commit.cleanup=default` git strips them when an editor was used and keeps them
+when the message came from `-m`, so a forbidden word on a `#` line reaches the
+stored commit in the second case but not the first.
+
+The CI job reads the pattern from `origin/main`, never from the ref under test,
+so a pull request cannot edit the pattern file and weaken the check validating
+that same pull request. A pattern change takes effect once merged.
 
 `attribution.sessionUrl` is set to `false` alongside `commit` and `pr`. It
 controls a separate `Claude-Session:` trailer containing a claude.ai link, which

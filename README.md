@@ -15,9 +15,10 @@ npx playwright install chromium
 
 **The `core.hooksPath` line is required.** `core.hooksPath` is local repository
 configuration and is not carried in the repository itself, so a fresh clone has
-no hooks active until you run it. Without it the `commit-msg` guard described in
-the project instructions file is silently inactive, and the CI check becomes the
-only thing standing between a bad commit message and `main`.
+no hooks active until you run it. Without it every guard in `.githooks/` is
+silently inactive — `commit-msg`, `prepare-commit-msg`, and the `pre-push`
+branch name check — and CI becomes the only thing standing between a bad commit
+message and `main`.
 
 Verify it took effect:
 

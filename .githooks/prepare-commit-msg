@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Records how git obtained this commit message so that `commit-msg` can tell
+# whether git is going to strip `#` comment lines from it.
+#
+# Git's `default` cleanup mode means "strip" when an editor was involved and
+# "whitespace" when it was not, and the two differ in whether comment lines
+# survive into the stored commit. `commit-msg` receives only the message file
+# and cannot tell them apart; this hook can, because git passes the source as
+# its second argument ("message" for -m/-F, empty when an editor is opened).
+#
+# Never block a commit from here: a failure to record the source degrades
+# `commit-msg` to its conservative branch, it does not open a hole.
+source_path="$(git rev-parse --git-path photolab-commit-source 2>/dev/null || true)"
+if [[ -n "$source_path" ]]; then
+  printf '%s' "${2-}" > "$source_path" 2>/dev/null || true
+fi
+exit 0

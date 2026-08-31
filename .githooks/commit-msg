@@ -5,7 +5,8 @@ msg_file="$1"
 
 # The pattern lives in one file, read by both this hook and the commit-message
 # job in .github/workflows/ci.yml, so the two cannot drift apart.
-patterns_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/forbidden-patterns.txt"
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+patterns_file="$hook_dir/forbidden-patterns.txt"
 
 if [[ ! -f "$patterns_file" ]]; then
   echo "commit-msg hook: $patterns_file is missing; refusing to run unguarded." >&2
@@ -14,17 +15,75 @@ fi
 
 FORBIDDEN="$(cat "$patterns_file")"
 
-# Check only the text the commit will actually carry. `git commit -v` appends a
-# scissors block containing the diff, which legitimately contains these words
-# when this hook itself is being edited; `#` lines are comments git discards.
-msg_body="$(sed '/^#.*>8/,$d' "$msg_file" | git stripspace --strip-comments)"
+# This hook must test exactly the text that ends up in the commit object.
+# Stripping more than git does creates false negatives; stripping less creates
+# false positives against git's own status template, which lists changed paths
+# and would therefore reject any editor commit touching CLAUDE.md.
+#
+# Comment lines survive into the stored message under `verbatim` and
+# `whitespace`, and also under `default` when the message came from -m/-F rather
+# than an editor. All four cases were verified against git 2.50 rather than
+# assumed. Comment removal itself is delegated to `git stripspace`, so it honours
+# core.commentChar instead of reimplementing git's rules with a regex.
+cleanup="$(git config --get commit.cleanup || true)"
+[[ -n "$cleanup" ]] || cleanup=default
 
-if grep -qiE "$FORBIDDEN" <<<"$msg_body"; then
-  echo "" >&2
-  echo "commit-msg hook: commit blocked." >&2
-  echo "" >&2
-  echo "This message references AI tooling or adds an attribution trailer." >&2
-  echo "Rewrite it to describe the change only." >&2
-  echo "" >&2
+source_path="$(git rev-parse --git-path photolab-commit-source 2>/dev/null || true)"
+msg_source=""
+if [[ -n "$source_path" && -f "$source_path" ]]; then
+  msg_source="$(cat "$source_path")"
+  rm -f "$source_path"
+fi
+
+case "$cleanup" in
+  verbatim | whitespace)
+    strip_comments=0
+    ;;
+  strip | scissors)
+    strip_comments=1
+    ;;
+  *)
+    # `default`: git strips comments only when an editor was opened.
+    #
+    # `git commit -m ... -e` reports source "message" yet does open an editor,
+    # so this branch is conservative there and checks git's template too. That
+    # can only produce a false rejection, never a missed one, and the message
+    # names the offending line so the cause is obvious.
+    if [[ "$msg_source" == "message" ]]; then
+      strip_comments=0
+    else
+      strip_comments=1
+    fi
+    ;;
+esac
+
+comment_char="$(git config --get core.commentChar || true)"
+[[ -n "$comment_char" && "$comment_char" != "auto" ]] || comment_char='#'
+
+# Everything from the `git commit -v` scissors line is discarded by git under
+# every cleanup mode, verbatim included, so dropping it here is always correct.
+# Without this, editing this hook with `commit -v` would fail on its own diff.
+# Matched by string position rather than regex so the comment character cannot
+# be interpreted as a metacharacter.
+msg_body="$(awk -v cc="$comment_char" '
+  substr($0, 1, length(cc)) == cc && index($0, ">8") > 0 { exit }
+  { print }
+' "$msg_file")"
+
+if (( strip_comments )); then
+  msg_body="$(printf '%s\n' "$msg_body" | git stripspace --strip-comments)"
+fi
+
+if printf '%s\n' "$msg_body" | grep -qiE "$FORBIDDEN"; then
+  {
+    echo ""
+    echo "commit-msg hook: commit blocked."
+    echo ""
+    echo "This message references AI tooling or adds an attribution trailer:"
+    printf '%s\n' "$msg_body" | grep -inE "$FORBIDDEN" | sed 's/^/    line /'
+    echo ""
+    echo "Rewrite it to describe the change only."
+    echo ""
+  } >&2
   exit 1
 fi
