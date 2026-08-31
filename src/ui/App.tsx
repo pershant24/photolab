@@ -1,6 +1,7 @@
+import { Viewport } from './Viewport'
+
 /**
- * Application shell. The viewport and adjustment panels are filled in as the
- * render pipeline lands; this file owns layout only and holds no editor state.
+ * Application shell. Owns layout only and holds no editor state.
  */
 export function App() {
   return (
@@ -11,11 +12,8 @@ export function App() {
       </header>
 
       <main className="flex min-h-0 flex-1">
-        <section
-          className="flex flex-1 items-center justify-center"
-          aria-label="Image viewport"
-        >
-          <p className="text-sm text-ink-dim">No image loaded.</p>
+        <section className="flex min-w-0 flex-1" aria-label="Image viewport">
+          <Viewport />
         </section>
 
         <aside

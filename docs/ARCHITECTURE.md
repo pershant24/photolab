@@ -112,8 +112,10 @@ image in overlapping tiles.
 **Every spatial parameter is normalised against image dimensions.** Grain size,
 blur radius, aberration offset, vignette falloff. A radius expressed in pixels
 looks different on a 2048px proxy than on a 6000px export, so preview would lie
-about the result. Every pass receives both `uResolution` and `uImageSize`; the
-rule and its worked example are in
+about the result. Every pass receives `uResolution`, `uImageSize` and
+`uSourceRect` — three, not two: the buffer-to-source scale factor is not
+recoverable from the first two alone, and the form that appears to recover it
+cancels down to using neither. The rule and the arithmetic are in
 [`SHADER_CONVENTIONS.md`](SHADER_CONVENTIONS.md).
 
 **`EditState` is a single flat serialisable object.** No layers, no node graph.
@@ -186,7 +188,8 @@ importing a published IDT is exactly when this bites.
 
 **Any colour function existing in both TypeScript and GLSL must have a test
 asserting they agree**, across a value ramp, comparing the shader to the
-TypeScript rather than to itself.
+TypeScript rather than to itself — and reading the intermediate buffer rather
+than the canvas, for the reason measured in `SHADER_CONVENTIONS.md` §4.
 
 ---
 
@@ -255,14 +258,18 @@ rules below are what that graph is built to enforce.
    is non-trivial. Unit test it against known values or a derivable property.
    This is the reference the shader is later checked against.
 3. **Write the shader** in `src/render/shaders/<effect>.glsl`. Use `#include` for
-   shared colour functions rather than copying them. Declare `uResolution` and
-   `uImageSize`, and normalise every spatial parameter against them.
+   shared colour functions rather than copying them. Declare `uResolution`,
+   `uImageSize` and `uSourceRect`, and normalise every spatial parameter against
+   `uSourceRect` rather than against the buffer.
 4. **Add the pass module** in `src/render/passes/<effect>.ts`, exporting its
    uniform bindings and an `enabled(state)` predicate.
 5. **Register it in `src/render/graph.ts` at its correct point in the physical
    ordering**, not at the end.
 6. **Add an agreement test** asserting the shader matches the TypeScript across a
-   value ramp.
+   value ramp — reading the pass's **own output buffer**, not the canvas. A
+   canvas assertion is measuring the whole chain, and the chain round-trips
+   through the display transform, which cancels most of what you are trying to
+   detect. `SHADER_CONVENTIONS.md` §4 has the measurement.
 7. **If the pass has a spatial kernel, declare its overlap**, so tiled export can
    expand tile bounds and avoid seams.
 
@@ -282,7 +289,9 @@ the centre, monotonically decreasing, and never negative.
 
 **Step 3.** `src/render/shaders/vignette.glsl`. The radius is a *spatial*
 parameter, so it is expressed in units of the source image and converted with
-`uImageSize`, never in pixels of `uResolution`. See
+`uSourceRect`, never in pixels of `uResolution`. The centre comes from
+`uSourceRect.xy` too — without it every export tile is vignetted about its own
+middle. See
 [`SHADER_CONVENTIONS.md`](SHADER_CONVENTIONS.md) for the exact form; getting
 this wrong is invisible in preview and appears only on export.
 

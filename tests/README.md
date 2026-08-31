@@ -4,6 +4,7 @@
 |---|---|---|---|
 | `tests/unit/` | Vitest | yes | Pure TypeScript. Colour maths, curve evaluation, state reducers. |
 | `tests/probe/` | Playwright | yes | Capability probes. Assert the browser can do what the renderer assumes. |
+| `tests/render/` | Playwright | yes | Numeric readback from the real render graph, compared against the TypeScript reference. Not image diffing. |
 | `tests/golden/` | Playwright | **not yet** | Rendered output against committed reference images. Arrives at Milestone 3 with the first spatial effects. |
 
 Vitest collects `tests/unit/**/*.test.ts`; Playwright collects `**/*.spec.ts`
@@ -48,6 +49,29 @@ assert they agree.** `tests/unit/transfer.test.ts` derives the ACEScct slope
 constant from the log segment rather than trusting the transcribed value;
 `tests/unit/grade.test.ts` checks the contrast operator against a closed-form
 power law obtained without going through the encode and decode functions at all.
+
+**Prove a test can fail before trusting it.** Every assertion in this repository
+that guards something subtle has been run against a deliberate mutation, and the
+result recorded. Three that changed the design rather than confirming it:
+
+- Swapping the curve module's monotone tangents for Catmull-Rom fails eight
+  tests, five of them the flat-segment cases. Before that check, the flat cases
+  asserted monotonicity, which a curve wobbling by 1e-9 across a run the user set
+  flat would have passed; they now assert exact flatness.
+- Transposing the CAT02 cone response matrix is caught **only** by the published
+  reference comparison. The reverse-adaptation round trip, the white-point test
+  and the identity test all still pass, because the construction collapses to the
+  identity for any invertible cone matrix.
+- Perturbing one coefficient of the sRGB-to-ACEScg matrix in the GLSL by 1%
+  moves the rendered canvas by at most one 8-bit code value, and not at all on
+  saturated patches, because the pipeline round-trips through the inverse matrix
+  and the display clamp removes what is left. The canvas assertion passed the
+  mutation. Reading the ACEScg intermediate instead catches 1% and 0.1% alike;
+  see `tests/render/plumbing.spec.ts`.
+
+The pattern is the same each time: an assertion that looks like it covers
+something can be blind to it, and running the mutation is the only way to find
+out which.
 
 ## Renderer baseline
 

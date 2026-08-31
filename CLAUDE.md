@@ -124,10 +124,18 @@ Two rules inside this that are easy to get wrong:
 image dimensions.** A blur radius in pixels looks different on a 2048px proxy
 than on a 6000px export, so preview would lie about the result.
 
-Every pass receives both:
+Every pass receives all three:
 
 - `uResolution` — the dimensions of the buffer currently being rendered
 - `uImageSize` — the dimensions of the full source image
+- `uSourceRect` — the region of the source this buffer covers, in source pixels
+
+Three and not two. The buffer-to-source scale factor is **not** recoverable from
+the first two: a crop and a downscale can give identical values for both with
+different scales, and the expression that appears to recover it algebraically
+cancels down to using neither. It is right on the interactive proxy by accident
+and wrong on every export tile. `docs/SHADER_CONVENTIONS.md` §2 carries the
+arithmetic.
 
 Spatial parameters are defined in units of the source image and converted using
 these. The full rule, with a worked example of both the correct and the
@@ -139,9 +147,11 @@ there is nothing for it to measure until then. Until it lands the rule is held
 by review and by the uniform contract making the correct form the convenient
 one.
 
-Both values are in **orientation-corrected space**. EXIF orientation is applied
-as a texture-coordinate transform, so for 90°/270° rotations `uImageSize`,
-proxy sizing, and export tile grids all use the swapped dimensions.
+All three are in **orientation-corrected space**. EXIF orientation is applied
+during decode by `createImageBitmap`'s `imageOrientation: 'from-image'`, not by
+a texture-coordinate transform in a pass, so for 90°/270° rotations `uImageSize`,
+`uSourceRect`, proxy sizing, and export tile grids all use the swapped
+dimensions.
 
 ---
 
