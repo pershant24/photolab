@@ -1,1 +1,1 @@
-claude|anthropic|co-authored-by|generated with|🤖|noreply@anthropic
+zzzz-never-matches-anything
