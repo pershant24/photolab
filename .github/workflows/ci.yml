@@ -32,7 +32,10 @@ jobs:
           # from the checked out ref would let a pull request that edits the
           # pattern file weaken the very check validating that pull request.
           # A change to the pattern takes effect once it is merged to main.
-          git fetch --no-tags --depth=1 origin main
+          # Deliberately not --depth=1: a shallow fetch grafts this repository's
+          # history, which makes the previous push tip unreachable in the next
+          # step and silently degrades the range check to the tip commit only.
+          git fetch --no-tags origin main
 
           if ! git cat-file -e FETCH_HEAD:.githooks/forbidden-patterns.txt 2>/dev/null; then
             echo "::error::.githooks/forbidden-patterns.txt is missing on origin/main; refusing to run unguarded."
