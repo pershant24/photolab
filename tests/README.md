@@ -1,10 +1,15 @@
 # Tests
 
-| Directory | Runner | Purpose |
-|---|---|---|
-| `tests/unit/` | Vitest | Pure TypeScript. Colour maths, curve evaluation, state reducers. |
-| `tests/probe/` | Playwright | Capability probes. Assert the browser can do what the renderer assumes. |
-| `tests/golden/` | Playwright | Rendered output against committed reference images. |
+| Directory | Runner | Exists | Purpose |
+|---|---|---|---|
+| `tests/unit/` | Vitest | yes | Pure TypeScript. Colour maths, curve evaluation, state reducers. |
+| `tests/probe/` | Playwright | yes | Capability probes. Assert the browser can do what the renderer assumes. |
+| `tests/golden/` | Playwright | **not yet** | Rendered output against committed reference images. Arrives at Milestone 3 with the first spatial effects. |
+
+Vitest collects `tests/unit/**/*.test.ts`; Playwright collects `**/*.spec.ts`
+anywhere under `tests/`. The two suffixes are how a file is routed to a runner,
+so a `.spec.ts` placed under `tests/unit/` is silently ignored by Vitest and
+picked up by Playwright instead.
 
 ## Strategy
 

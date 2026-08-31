@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // Golden images are generated with SwiftShader, not a real GPU, so the browser
-// must be forced onto it here and in CI alike. See tests/golden/README.md.
+// must be forced onto it here and in CI alike. See tests/README.md.
 const SWIFTSHADER_ARGS = [
   '--use-gl=angle',
   '--use-angle=swiftshader',

@@ -130,9 +130,14 @@ Every pass receives both:
 - `uImageSize` — the dimensions of the full source image
 
 Spatial parameters are defined in units of the source image and converted using
-these. The full rule is in `docs/SHADER_CONVENTIONS.md` and
-`tests/golden/two-resolution.spec.ts` enforces it; both arrive with the first
-shader passes.
+these. The full rule, with a worked example of both the correct and the
+incorrect form, is in `docs/SHADER_CONVENTIONS.md`.
+
+`tests/golden/two-resolution.spec.ts` is what will enforce it mechanically, and
+**it does not exist yet** — it arrives with the first spatial effect, since
+there is nothing for it to measure until then. Until it lands the rule is held
+by review and by the uniform contract making the correct form the convenient
+one.
 
 Both values are in **orientation-corrected space**. EXIF orientation is applied
 as a texture-coordinate transform, so for 90°/270° rotations `uImageSize`,
@@ -174,8 +179,8 @@ drops the WebGL context.
 
 ## 6. Adding a pass
 
-The full recipe with a worked example lives in `docs/ARCHITECTURE.md`, which is
-written once the render graph exists. In outline:
+The full recipe, with a worked example that walks a vignette through every step,
+lives in `docs/ARCHITECTURE.md`. In outline:
 
 1. Add the parameters to `EditState` in `src/core/state/`, with defaults. They
    must be plain serialisable values.

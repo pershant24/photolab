@@ -63,16 +63,39 @@ export function srgbEotf(encoded: number): number {
 /**
  * sRGB OETF: linear -> encoded. The inverse of {@link srgbEotf}.
  *
+ * ## The 2.33e-9 discontinuity is deliberate. Do not "fix" it.
+ *
  * "Inverse" holds to about 1e-15 everywhere except in a narrow band around the
  * break point, where it holds to about 3e-9. That is a property of the
  * specification, not of this implementation: 0.04045 and 0.0031308 are rounded
  * values, and the two segments they separate therefore cross at
- * 0.0031308072830676845 rather than at 0.0031308 exactly — a gap of 2.33e-9.
- * Inputs falling inside that gap take the linear branch one way and the power
- * branch the other. Measured, and asserted at both precisions in
- * `tests/unit/transfer.test.ts`; the alternative is to redefine the thresholds
- * to their exact crossing, which would make this project's sRGB differ from
- * every other implementation's for a 1e-9 gain.
+ * **0.0031308072830676845** rather than at 0.0031308 exactly. Inputs falling
+ * inside that 2.33e-9 gap take the linear branch in one direction and the power
+ * branch in the other.
+ *
+ * There is a tidier variant in circulation that solves for the exact threshold
+ * and is continuous to machine precision. **It is not used here, and replacing
+ * these constants with it would be a regression rather than a cleanup.** This
+ * is a photo editor: the values it produces have to match what browsers,
+ * display drivers and every other imaging application actually implement, and
+ * all of them implement the rounded specification values. Being right to 1e-9
+ * against a definition nobody else uses is worse than being bit-compatible with
+ * everyone.
+ *
+ * ## The tolerances this forces, and where they come from
+ *
+ * `tests/unit/transfer.test.ts` asserts the round trip at two bounds, and both
+ * are **derived rather than tuned until the test passed**:
+ *
+ *  - **Linear space: 2.4e-9**, the measured gap of 2.33e-9 with a little room,
+ *    since a bound sitting exactly on the observed value is not a bound.
+ *  - **Encoded space: that same gap multiplied by 12.92**, the slope of the
+ *    linear segment the discrepancy falls on. Predicted 3.1e-8 before running;
+ *    observed 2.96e-8. Had the number been tuned, its agreement with the slope
+ *    would be a coincidence rather than evidence.
+ *
+ * Away from the break the same tests assert the round trip to 1e-12, so
+ * loosening for the break point does not buy slack anywhere else on the ramp.
  */
 export function srgbOetf(linear: number): number {
   const magnitude = Math.abs(linear)

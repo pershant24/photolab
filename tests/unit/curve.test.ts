@@ -118,6 +118,56 @@ describe('monotone curve interpolation', () => {
     }
   })
 
+  // Flat segments: a user drags two curve points to the same height, which is
+  // exactly what flattening a highlight roll-off looks like. Equal consecutive
+  // y values make a secant slope of zero, and a limiter written without a sign
+  // guard divides by it.
+  //
+  // These assert **exact** equality across the flat interval rather than
+  // monotonicity, deliberately. A curve that wobbles by 1e-9 across a run the
+  // user set flat is still wrong, and a monotonicity assertion passes it.
+  describe.each([
+    ['two consecutive equal values', [0, 0.25, 0.5, 0.75, 1], [0, 0.4, 0.4, 0.8, 1]],
+    ['three consecutive equal values', [0, 0.2, 0.4, 0.6, 0.8, 1], [0, 0.5, 0.5, 0.5, 0.8, 1]],
+    ['a flat segment at the start of the range', [0, 0.25, 0.5, 0.75, 1], [0.2, 0.2, 0.5, 0.8, 1]],
+    ['a flat segment at the end of the range', [0, 0.25, 0.5, 0.75, 1], [0, 0.3, 0.6, 0.9, 0.9]],
+    ['a flat segment at both ends', [0, 0.25, 0.5, 0.75, 1], [0.1, 0.1, 0.5, 0.9, 0.9]],
+    ['every value equal', [0, 0.25, 0.5, 0.75, 1], [0.42, 0.42, 0.42, 0.42, 0.42]],
+    ['only two control points, both equal', [0, 1], [0.3, 0.3]],
+  ])('with %s', (_name, xs: number[], ys: number[]) => {
+    it('holds the flat intervals exactly flat', () => {
+      const tangents = curveTangents(xs, ys)
+      for (let i = 0; i < xs.length - 1; i++) {
+        const y0 = ys[i] ?? Number.NaN
+        const y1 = ys[i + 1] ?? Number.NaN
+        if (y0 !== y1) continue
+
+        const x0 = xs[i] ?? Number.NaN
+        const x1 = xs[i + 1] ?? Number.NaN
+        for (let k = 0; k <= 50; k++) {
+          const x = x0 + ((x1 - x0) * k) / 50
+          expect(evaluateCurveWithTangents(xs, ys, tangents, x)).toBeCloseTo(y0, 15)
+        }
+      }
+    })
+
+    it('produces no NaN or Infinity anywhere on the curve', () => {
+      // The failure mode a zero secant would actually cause, stated directly.
+      for (const v of sampleDense(xs, ys)) {
+        expect(Number.isFinite(v)).toBe(true)
+      }
+      for (const t of curveTangents(xs, ys)) {
+        expect(Number.isFinite(t)).toBe(true)
+      }
+    })
+
+    it('still passes through every control point', () => {
+      for (let i = 0; i < xs.length; i++) {
+        expect(evaluateCurve(xs, ys, xs[i] ?? Number.NaN)).toBeCloseTo(ys[i] ?? Number.NaN, 15)
+      }
+    })
+  })
+
   it('rejects control points that are not strictly increasing in x', () => {
     expect(() => curveTangents([0, 0.5, 0.5, 1], [0, 0.2, 0.6, 1])).toThrow(RangeError)
     expect(() => curveTangents([0, 0.5, 0.4, 1], [0, 0.2, 0.6, 1])).toThrow(RangeError)

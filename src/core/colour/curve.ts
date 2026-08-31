@@ -18,19 +18,34 @@
  * non-monotone control points, because that is the case that separates PCHIP
  * from the splines above.
  *
- * ## This one does not transliterate into GLSL, and does not need to
+ * ## This module is the one deliberate exception to shader translatability
  *
  * Every other function in `src/core/colour/` is a per-pixel operation with a
- * line-for-line shader equivalent. This is not: the tangents depend on the whole
- * control point set, and a fragment shader cannot loop over a variable-length
- * array of them per pixel.
+ * line-for-line GLSL equivalent, and the project's standing rule is that
+ * anything which cannot be transliterated should be restructured rather than
+ * excused. This module is the exception, and it is granted rather than
+ * tolerated. **Do not attempt to port it to GLSL.**
  *
- * That is the normal answer for curves and it is not a compromise. The shader
- * side samples a **1D lookup texture** that this module bakes on the CPU
- * whenever the control points change — which is on a slider drag at most, not
- * per frame per pixel. {@link sampleCurveLut} exists for exactly that, and is
- * structured so producing all N samples costs one pass over the control points
- * rather than N.
+ * It cannot be ported: the tangents depend on the entire control point set, so
+ * a fragment shader would have to loop over a variable-length array of them for
+ * every pixel. It also uses a throwing dynamic accessor, which has no GLSL
+ * equivalent at all.
+ *
+ * ## The architectural constraint that resolves it
+ *
+ * **Curves are baked into a 1D lookup texture on the CPU and uploaded; the
+ * shader samples the LUT and never evaluates a spline.** That is a rule binding
+ * the render graph, not a note about this file — it is stated as such in
+ * `docs/ARCHITECTURE.md`, and {@link sampleCurveLut} is the function that
+ * implements it.
+ *
+ * The exception is earned by that rule rather than asserted alongside it. A
+ * rebake happens once per control-point change — a slider drag at most, not per
+ * frame and not per pixel — so the variable-length loop runs on the CPU where
+ * loops are free, and the throwing accessor sits off the hot path **by
+ * construction** rather than by anyone remembering to keep it there. Had curves
+ * been evaluated per pixel, neither concession would have been available and the
+ * module would have had to be restructured after all.
  */
 
 /**

@@ -44,9 +44,14 @@ The renderer is a pure function of `(sourceImage, EditState)`. Passes run in the
 order the phenomena physically occur — scene, then lens, then film, then grade,
 then display — in an ACEScg working space at RGBA16F precision.
 
+- `docs/ARCHITECTURE.md` — the design reasoning in one place: what this is, the
+  stack and its deliberate exclusions, the invariants, the build order, and the
+  recipe for adding a pass with a worked example
 - `docs/COLOUR_PIPELINE.md` — the pass order and why it is that order
-- `docs/ARCHITECTURE.md` — module layout and the recipe for adding a pass *(lands with the render graph)*
-- `docs/SHADER_CONVENTIONS.md` — uniform conventions and the resolution-independence rule *(lands with the first shader passes)*
+- `docs/SHADER_CONVENTIONS.md` — the uniform contract and the
+  resolution-independence rule, with a worked example of both getting it right
+  and getting it wrong
+- `tests/README.md` — testing strategy and the measured browser baseline
 - `CLAUDE.md` — project rules, including the commit attribution constraint
 
 ## Rendering notes

@@ -12,6 +12,33 @@
  * other in the fourth decimal depending on how many digits of the chromaticities
  * the author carried and which chromatic adaptation they used, so they are the
  * weaker of the two checks.
+ *
+ * # Convention: white points come from chromaticities, never from XYZ triples
+ *
+ * **Every white point in this project is derived from its CIE xy chromaticity
+ * via {@link xyToXYZ}. Tabulated XYZ triples are never used, and a matrix from
+ * anywhere else must be checked for which D65 it assumes before it is used
+ * here.**
+ *
+ * There are two D65s in circulation and they are not interchangeable:
+ *
+ * | Source | X | Y | Z |
+ * |---|---|---|---|
+ * | chromaticity (0.3127, 0.3290), as sRGB and Rec.709 state it | 0.95045593 | 1 | 1.08905775 |
+ * | ASTM E308 tabulated, as Lindbloom and many ICC tools use | 0.95047 | 1 | 1.08883 |
+ *
+ * They differ in the fourth decimal of Z, which is why two widely copied
+ * published sRGB to XYZ matrices disagree by 6.6e-5 — see the note in
+ * `tests/unit/primaries.test.ts`, which pins this module to the first of them.
+ *
+ * The reason this is a stated convention rather than a footnote is that 6.6e-5
+ * is far too small to notice and the next occasion will be worse than the last.
+ * Adding Display P3, importing a published IDT or ODT, or lifting a matrix from
+ * a codebase built on the ASTM triple would each mix the two conventions
+ * silently, and the resulting error would compose with the others already in
+ * the chain rather than standing alone where a row-sum test could isolate it.
+ * Deriving everything from chromaticities makes the mixing impossible instead
+ * of merely unlikely.
  */
 
 import type { Mat3, Vec3 } from './types'

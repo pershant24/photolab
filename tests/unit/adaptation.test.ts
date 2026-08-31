@@ -83,6 +83,17 @@ describe('chromatic adaptation', () => {
     ['CAT02', cat02AdaptationMatrix],
     ['Bradford', bradfordAdaptationMatrix],
   ])('is undone by the reverse adaptation (%s)', (_name, build) => {
+    // Worth having, but be clear about what it covers, because it is easy to
+    // credit it with more. The construction is `C^-1 * diag(Cwd/Cws) * C`, so
+    // the reverse is `C^-1 * diag(Cws/Cwd) * C` and the product collapses to
+    // `C^-1 * I * C` for ANY invertible cone matrix C. It therefore exercises
+    // `mat3Inverse` and nothing about C itself: a transposed or entirely wrong
+    // cone response matrix passes this test unchanged.
+    //
+    // Verified by transposing CONE_RESPONSE_CAT02 and re-running: this test,
+    // the white-point test and the identity test all still passed, and only
+    // the published-reference comparison above failed. That comparison is what
+    // guards the cone matrices; this one guards the inversion.
     const there = build(D65_XYZ, D50_XYZ)
     const back = build(D50_XYZ, D65_XYZ)
     expectMat3CloseTo(mat3Mul(back, there), MAT3_IDENTITY, 12)
