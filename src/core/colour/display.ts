@@ -1,5 +1,9 @@
 /**
- * The display transform: scene-referred ACEScg to an encoded display signal.
+ * The display transform: display-referred ACEScg to an encoded display signal.
+ *
+ * Display-referred, not scene-referred — see `docs/ARCHITECTURE.md` §1a. That is
+ * why this operator is the identity through the midtones rather than applying a
+ * rendering of its own: the data already carries the camera's.
  *
  * Three stages, each independently disableable, in this order:
  *
@@ -25,11 +29,18 @@
  * the film stage*. That last clause decides it.
  *
  * **Not the ACES RRT plus sRGB ODT**, though it is the reference-correct answer
- * for an ACES pipeline. It is several hundred lines, it carries a pronounced
- * look of its own — a strong S-curve and a well-known skew through the reds and
- * oranges — which would sit underneath the film curves applying a second look
- * they did not ask for. Decisively, it maps 0.18 to roughly 0.10 display-linear,
- * which moves middle grey and breaks the property below.
+ * for an ACES pipeline. It is several hundred lines and carries a pronounced look
+ * of its own, which would sit underneath the film curves applying a second look
+ * they did not ask for.
+ *
+ * The decisive reason is better than that, and is about referredness rather than
+ * about taste. The RRT maps 0.18 to roughly 0.10 display-linear because it
+ * **includes an OOTF** — the rendering that turns scene light into display light
+ * for a dim viewing surround. That is correct for scene-referred camera data. The
+ * input here is a JPEG, which already carries a camera's rendering, so applying
+ * the RRT would apply an OOTF twice. Middle grey preservation is the right
+ * constraint *because* this pipeline is display-referred; against scene-referred
+ * data it would have been the wrong one.
  *
  * **Not Reinhard, plain or extended.** Neither is the identity anywhere, so both
  * compress the midtones and move middle grey.
@@ -59,26 +70,47 @@ import { mat3MulVec3 } from './types'
  * closer to untouched but crams pushed highlights into fewer code values, and a
  * lower knee spreads the highlights at the cost of dimming nominal white.
  *
- * The default was chosen from a measured sweep rather than by reasoning, on a
- * backlit frame, trading how far an *unedited* image moves against how many
- * distinct code values the recovered highlights occupy:
+ * # There is no free choice here, and the arithmetic says so exactly
  *
- *   knee 0.4  unedited shifts 13.3 code values on average   19 highlight levels
- *   knee 0.6  unedited shifts  5.7                          15
- *   knee 0.75 unedited shifts  ~1.9                         ~12
- *   knee 0.8  unedited shifts  1.1                          10
+ * Any operator that is the identity below a knee, continuous, and compressing
+ * above it maps **everything between the knee and 1.0 below itself**. So
+ * preserving unedited white exactly and rolling off above 1.0 cannot both hold.
+ * For this shoulder the trade has a closed form:
  *
- * Dropping the knee from 0.8 to 0.4 costs twelve code values of fidelity on
- * every unedited photograph to buy nine levels of highlight detail, which is a
- * poor bargain for an editor whose source is 8-bit: a JPEG has no data above
- * diffuse white to recover, so the roll-off is mostly working on values the
- * *pipeline* created rather than rescuing anything from the file.
+ *     f(1.0) = (1 + knee) / 2
  *
- * 0.75 sits where the unedited shift is below the threshold of visibility and
- * most of the highlight separation is still there. `tests/README.md` carries the
- * full table.
+ * which means **the code values given up below white are exactly the code values
+ * gained above it.** Everything from a scene value of 1.0 up to infinity lands
+ * between `f(1.0)` and 1, so the deficit and the headroom are the same number:
+ *
+ *   knee 0.60   white renders at code 231   24 codes given up, 24 gained
+ *   knee 0.75   white renders at code 240   15 given up, 15 gained
+ *   knee 0.85   white renders at code 246    9 given up, 9 gained
+ *   knee 0.95   white renders at code 252    3 given up, 3 gained
+ *
+ * The knee *is* the white point parameter, seen from the other end.
+ *
+ * The earlier default of 0.75 was picked against a mean shift across the whole
+ * image, which was the wrong statistic: every pixel below the knee is unchanged
+ * by construction, so averaging over them understates the effect at the only
+ * place the effect exists. Measured properly, 0.75 renders pure white 15 code
+ * values below white — invisible in a mean, invisible on a photograph in
+ * isolation, and plainly visible against white interface chrome or in a print.
+ *
+ * **0.85 is the default**: white within three and a half per cent of paper white,
+ * and nine code values of headroom for what the pipeline creates. It errs toward
+ * an unedited image looking like the file, which is the right default for an
+ * editor; the knee is a parameter for anyone who wants the other trade.
+ *
+ * Worth revisiting once the film stage exists, in both directions. Its
+ * characteristic curve has a shoulder of its own, which reduces what the display
+ * roll-off has to do; halation adds light, which increases it.
+ *
+ * **It must not adapt to the image's measured maximum.** A tile does not know
+ * the global maximum, so preview and export would disagree and the renderer
+ * would stop being a pure function of its inputs.
  */
-export const TONE_MAP_KNEE = 0.75
+export const TONE_MAP_KNEE = 0.85
 
 /**
  * Distance from the achromatic axis, as a fraction of the achromatic value, at
@@ -92,10 +124,12 @@ export const TONE_MAP_KNEE = 0.75
  * that maps distances above some threshold into a bounded range must therefore
  * start below 1.0 and touch the most saturated in-gamut colours.
  *
- * So the honest guarantee is the one asserted in the tests: **colours within
- * this distance are unchanged exactly**, and beyond it the change grows
- * smoothly. At 0.9 that is everything up to nine tenths of the way to the gamut
- * boundary; a pure primary moves by 0.05 of its own achromatic value.
+ * So the honest guarantee is the one asserted in the tests, and it is narrower
+ * than "in-gamut colours are unchanged": **colours within this distance are
+ * unchanged exactly**, and beyond it the change grows smoothly. At a threshold
+ * of 0.9 that covers everything up to nine tenths of the way to the gamut
+ * boundary. Beyond it, a pure display primary — which is in gamut — moves by
+ * **0.05 of its own achromatic value**, measured, not implied.
  */
 export const GAMUT_COMPRESS_THRESHOLD = 0.9
 

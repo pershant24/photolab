@@ -296,8 +296,17 @@ test.describe('crushed shadows are correct pre-tone-map behaviour', () => {
     // Pinned deliberately. This will look like a bug the first time anyone drags
     // the slider on a dark photograph, and it is not one: the ACEScct toe is
     // signed, so steepening about middle grey takes values below the pivot
-    // through zero. The tone map, when it lands, must *change* this behaviour
-    // rather than fix an untested one.
+    // through zero.
+    //
+    // **This is not an open display bug.** The tone map landed in Stage 5 and
+    // deliberately did not change it: the crushed figure — 39% of a night frame
+    // at a contrast of 1.3 — was measured before and after and is identical,
+    // because those pixels are already negative when the display transform
+    // receives them. The clamp is reporting the grade's output faithfully.
+    //
+    // The fix belongs to the **film stage's toe**, which is what gives shadows a
+    // floor to compress against instead of a cliff at zero. Anyone reading this
+    // as unfinished display work should read docs/ARCHITECTURE.md first.
     const contrast = 1.5
     const nearBlack = PATCHES.findIndex((p) => p.label === 'just below the sRGB break')
     expect(nearBlack).toBeGreaterThanOrEqual(0)

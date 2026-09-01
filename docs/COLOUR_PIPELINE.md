@@ -2,9 +2,13 @@
 
 ## Working space
 
-**ACEScg** — AP1 primaries, linear, scene-referred. Chosen because the film
-emulation is a simulation of a physical process, and physical processes are
-linear in radiometric quantities. Halation is light scattering back through a
+**ACEScg** — AP1 primaries, linear, and **display-referred**. See
+`ARCHITECTURE.md` §1a: the input is a JPEG, which already carries the camera's
+rendering, and a change of primaries is not a change of referredness. The
+pipeline is honest about that rather than synthesising a scene it does not have.
+
+AP1 and linear were chosen because the film emulation is a simulation of a
+physical process, and physical processes are linear in radiometric quantities. Halation is light scattering back through a
 substrate; grain is silver density; exposure is a change in the amount of light
 reaching the film. All of these are multiplications and convolutions in linear
 light, and all of them are wrong when applied to gamma-encoded values.
@@ -15,7 +19,7 @@ container before the display transform gets a chance to compress them
 deliberately.
 
 Intermediate render targets are **RGBA16F**, not RGBA32F. Half float has 10 bits
-of mantissa and an exponent, which is more than sufficient for scene-referred
+of mantissa and an exponent, which is more than sufficient for linear-light
 values that never exceed a few hundred, and it halves both bandwidth and memory
 against 32F. A 60MP image at RGBA16F is already 480MB per buffer; at 32F a
 ping-pong pair would be two gigabytes.
@@ -71,7 +75,9 @@ developed density, which does not exist until the curves have been applied.
 nothing to act on until the film stage has produced one.
 
 **5 last.** The display transform is the only stage that knows what the output
-device is. Everything before it is device-independent scene-referred data.
+device is. Everything before it is device-independent linear light — display
+referred, per `ARCHITECTURE.md` §1a, but independent of any particular display's
+primaries and transfer function until this stage.
 
 ## White balance
 

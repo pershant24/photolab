@@ -42,6 +42,63 @@ without being what the interactive path is tuned for.
 
 ---
 
+## 1a. The pipeline is display-referred, and that is a decision
+
+The working space is **ACEScg in its primaries and display-referred in its
+referredness**. Earlier drafts of these documents called it scene-referred
+throughout. That was wrong, and the correction matters more than a word.
+
+### Why it is display-referred
+
+An sRGB JPEG is display-referred by definition: the camera has already applied
+its own rendering — a tone curve with a shoulder, and a colour rendering —
+to turn what the sensor measured into something a monitor should show.
+Linearising it with the sRGB EOTF undoes the *encoding* and gives display-linear
+light: light as it will leave the screen, not light as it entered the lens.
+Converting to AP1 changes the primaries and nothing else. **A change of primaries
+is not a change of referredness.**
+
+### The decision: accept it
+
+The alternative was an approximate inverse OOTF at ingest and its forward
+counterpart in the display transform, giving the film stage a scene-referred
+domain to work in. That was considered and rejected. The argument:
+
+1. **Referredness is determined by the input, not by a transform.** No function
+   recovers what the camera discarded. An inverse OOTF would not restore a scene;
+   it would *synthesise* one, and the pipeline would then claim a property it does
+   not have. Being honestly display-referred is better than pretending otherwise.
+2. **Its central parameter would be untestable.** There is no ground truth to
+   check an inverse OOTF against — only "does the film curve look right
+   afterwards", which makes it a second eye-tuned layer existing to serve a first.
+3. **Both options are wrong in the highlights, which is where it matters most.**
+   Accepting display-referred means the film curve's shoulder acts on data the
+   camera already shouldered. Inverting with a power function means undoing a
+   shoulder that was never a power function. Neither is principled; one is
+   simple and does not claim otherwise.
+4. **The display transform is already correct as built.** It is the identity
+   through the midtones precisely because the data already carries a rendering.
+   Going scene-referred would require adding an OOTF to it and re-deriving every
+   property measured in Stage 5.
+5. **The honest fix is at the input.** RAW would give genuinely scene-referred
+   data. RAW is excluded from this project by design, and *that exclusion is what
+   settles this question.* It is a consequence of a decision already made, not a
+   new compromise.
+
+### What it means for the film stage
+
+A film characteristic curve maps log **scene** exposure to density. Here it will
+be specified over log **display-referred** exposure and tuned by eye. That is a
+stated choice, not an accident, and it is the thing to hold on to: the pass
+*ordering* and the physical reasoning behind it are unaffected — light still
+reaches the lens before the film, halation still precedes the curves, grain still
+follows them — but the curve's parameters are fitted to how it looks rather than
+derived from a datasheet.
+
+**Revisit if RAW support is ever added.** At that point ingest would produce
+genuinely scene-referred data, the film stage would want that domain, and the
+OOTF question becomes real and answerable rather than a guess.
+
 ## 2. Stack, and what is deliberately excluded
 
 Vite 7, React 19, TypeScript 5.9 strict with `noUncheckedIndexedAccess` and

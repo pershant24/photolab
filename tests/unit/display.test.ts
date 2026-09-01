@@ -12,6 +12,7 @@ import {
 } from '../../src/core/colour/display'
 import { ACESCG_TO_SRGB, SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
 import { MIDDLE_GREY_LINEAR } from '../../src/core/colour/grade'
+import { hueDifference, labHueAngle, linearSrgbToLab } from '../../src/core/colour/lab'
 import { srgbEotf, srgbOetf } from '../../src/core/colour/transfer'
 import { mat3MulVec3 } from '../../src/core/colour/types'
 import type { Vec3 } from '../../src/core/colour/types'
@@ -142,35 +143,61 @@ describe('gamut compression', () => {
     expect(a).not.toEqual(b)
   })
 
-  it('preserves hue exactly, which clipping does not', () => {
-    // Hue as the angle of the chroma vector in the plane perpendicular to the
-    // achromatic axis. Defined for any real triple, negatives included, which a
-    // saturation-based hue is not.
+  it('scales the chroma vector, which preserves RGB channel ratios by construction', () => {
+    // Labelled as a construction check, not as evidence about hue.
     //
-    // This began as "better than clipping" and failed: compressing each channel's
-    // own distance independently shifted hue further than clipping did, because
-    // moving channels by different proportions turns the chroma vector. Scaling
-    // the whole vector by one factor makes preservation exact, so the assertion
-    // is exactness rather than an improvement.
-    const hueAngle = (rgb: Vec3): number => {
-      const alpha = rgb[0] - (rgb[1] + rgb[2]) / 2
-      const beta = (Math.sqrt(3) / 2) * (rgb[1] - rgb[2])
-      return Math.atan2(beta, alpha)
+    // This assertion used to be the hue test, measured as an angle in the plane
+    // perpendicular to the achromatic axis, and it passed at 1e-9. It could not
+    // have done anything else: that angle comes from a linear projection which
+    // annihilates the achromatic direction, and this operator scales the chroma
+    // vector along exactly that projection, so `atan2(s*beta, s*alpha)` equals
+    // `atan2(beta, alpha)` identically for any positive s. The metric and the
+    // algorithm agreed by construction and the number was float noise.
+    //
+    // It is kept because it does state what the operator does — one factor, all
+    // channels — but the question of whether *hue* survives is the next test,
+    // measured somewhere the algorithm can fail.
+    for (const original of [[1, -0.3, -0.1], [0.2, 1.1, -0.35]] as Vec3[]) {
+      const out = gamutCompressRgb(original, GAMUT_COMPRESS_THRESHOLD)
+      const achromatic = Math.max(original[0], original[1], original[2])
+      // The peak channel is its own fixed point, so its ratio is 0/0; the claim
+      // is about the channels that actually move.
+      const moving = [0, 1, 2].filter((c) => original[c] !== achromatic)
+      expect(moving.length).toBeGreaterThan(1)
+      const scales = moving.map(
+        (c) => ((out[c] ?? Number.NaN) - achromatic) / ((original[c] ?? Number.NaN) - achromatic),
+      )
+      for (const scale of scales) {
+        expect(scale).toBeCloseTo(scales[0] ?? Number.NaN, 9)
+      }
     }
-    const angleDelta = (a: number, b: number): number => {
-      const d = Math.abs(a - b) % (2 * Math.PI)
-      return d > Math.PI ? 2 * Math.PI - d : d
-    }
+  })
+
+  it('shifts perceptual hue far less than clipping does', () => {
+    // Measured in CIELAB, where scaling toward achromatic in linear RGB does
+    // *not* preserve hue, so the operator can fail this and the number means
+    // something.
+    //
+    // The bound is a bound rather than an exactness claim, because compression
+    // genuinely does move perceptual hue — up to 17 degrees on a saturated
+    // green. What it buys is that clipping moves it three times as far in total,
+    // and worse on every colour tested.
+    const hueOf = (rgb: Vec3): number => labHueAngle(linearSrgbToLab(rgb))
 
     const cases: Vec3[] = [
       [1, -0.3, -0.1],
       [0.9, -0.15, 0.4],
       [0.2, 1.1, -0.35],
       [-0.25, 0.6, 1],
-      [2, -1, 0.5],
+      [-0.4, -0.1, 1],
+      [-0.3, 0.9, 0.95],
+      [1.4, 0.35, -0.2],
     ]
 
+    let compressedTotal = 0
     let clippedTotal = 0
+    const worse: string[] = []
+
     for (const original of cases) {
       const clipped: Vec3 = [
         Math.max(0, original[0]),
@@ -178,17 +205,26 @@ describe('gamut compression', () => {
         Math.max(0, original[2]),
       ]
       const compressed = gamutCompressRgb(original, GAMUT_COMPRESS_THRESHOLD)
+      const target = hueOf(original)
+      const compressedShift = hueDifference(hueOf(compressed), target)
+      const clippedShift = hueDifference(hueOf(clipped), target)
 
-      expect(
-        angleDelta(hueAngle(compressed), hueAngle(original)),
-        `compression moved the hue of ${original.join(', ')}`,
-      ).toBeLessThan(1e-9)
-
-      clippedTotal += angleDelta(hueAngle(clipped), hueAngle(original))
+      compressedTotal += compressedShift
+      clippedTotal += clippedShift
+      if (compressedShift > clippedShift) {
+        worse.push(`${original.join(', ')}: compressed ${compressedShift.toFixed(1)}deg vs clipped ${clippedShift.toFixed(1)}deg`)
+      }
+      // No single colour may move further than this. Deep blues are the ones to
+      // watch: RGB-ratio hue and perceptual hue diverge most there, which is the
+      // "blue goes purple" failure, and it is where the compressor will work
+      // hardest once white balance and film curves land.
+      expect(compressedShift, `hue shift on ${original.join(', ')}`).toBeLessThan(20)
     }
 
-    // And clipping genuinely does move it, so the assertion above is not vacuous.
-    expect(clippedTotal).toBeGreaterThan(0.2)
+    expect(worse.join('\n'), 'compression must not be worse than clipping on any colour').toBe('')
+    // Measured at 39.8 against 115.9. Asserted with room, since the point is the
+    // margin rather than the exact figure.
+    expect(compressedTotal).toBeLessThan(clippedTotal / 2)
   })
 
   it('reduces saturation rather than darkening, leaving the brightest channel alone', () => {

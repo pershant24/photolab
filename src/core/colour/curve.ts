@@ -150,7 +150,7 @@ function endpointTangent(hEnd: number, hInner: number, deltaEnd: number, deltaIn
  *
  * Outside the control point range the curve is **clamped**, not extrapolated.
  * A cubic continued past its last control point diverges quickly, and the
- * values feeding a tone curve are scene-referred and unbounded above.
+ * values feeding a tone curve are linear light and unbounded above.
  */
 export function evaluateCurveWithTangents(
   xs: readonly number[],
