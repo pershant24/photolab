@@ -253,6 +253,11 @@ rather than merely alarming:
 | Ingest matrix, one coefficient +0.1% | fails | passes | **passes** |
 | Display matrix, one coefficient +0.1% | passes | fails | fails |
 
+### Derive the tolerance
+
+Never pick one. §5 is the construction, and it is the same construction for every
+agreement test in the project.
+
 ### Read a half-float buffer, not the canvas
 
 8-bit output quantises at 1/255 = 3.9e-3, and a 0.1% coefficient error falls
@@ -282,33 +287,104 @@ it is a principled exclusion rather than a tuned one. Assert that a useful numbe
 of channels survived the filter, or a bug in the clamp detection leaves the test
 green while comparing nothing.
 
-### Derive the tolerance from the terms, not from the result
-
-A bound proportional to the expected value is zero for a channel that **cancels**,
-and the out-of-gamut patches contain one: a red channel that is the sum of terms
-of magnitude 0.25 coming to exactly zero. Each term carries its own half-float
-quantisation error, those errors add rather than cancelling along with the terms,
-and the residual is 2.8e-4 against an expected value of 0. No absolute floor
-picked without looking at the terms is defensible there.
-
-So scale the bound by the sum of the absolute contributions to the dot product —
-the standard error-propagation bound — or by the result's own magnitude where
-that dominates. When a tolerance has to cross an encoding curve, carry it through
-the curve's slope; the sRGB OETF's slope is 12.92 near black and 0.44 near white,
-so a single bound cannot be right at both ends.
-
-### And prove the tolerance has margin
-
-A tolerance nobody has tested against a real error is a guess. Perturb a
-coefficient, confirm the test fails, and record the smallest error it catches.
-
 ### Report which patch failed and the per-channel delta
 
 "0.3% of pixels differ" does not survive contact with a real debugging session.
 Name the patch, the channel, the expected value, what was measured, and the
 delta.
 
-## 5. Context and precision
+## 5. Deriving a tolerance
+
+Every agreement test compares a shader against `src/core/colour/` and needs a
+bound. **A tolerance arrived at by loosening until the test passes is not a
+tolerance** — it is a record of how wrong the code was on the day it was written,
+and it will never detect anything again. This section is the construction to use
+instead. It is mechanical, it takes about ten minutes, and it is the same four
+steps for every pass.
+
+The principle: a tolerance is a *prediction* of how far the shader may
+legitimately differ from the reference, made from the arithmetic before the test
+is run. If the measured difference exceeds the prediction, either the shader is
+wrong or the prediction was — and both are worth knowing.
+
+### Step 1. Bound the error where the value is computed
+
+Work out the largest difference the two implementations can legitimately have at
+the point of measurement, from the operations and the storage format.
+
+The usual dominant term is **quantisation of the format the value is stored in**.
+An RGBA16F buffer has an 11-bit significand, so relative precision is `2^-11` =
+4.9e-4; an RGBA8 buffer quantises at 1/255 = 3.9e-3. Multiply by the magnitude of
+the value.
+
+**For a dot product — which every matrix row is — scale by the sum of the
+absolute contributions, not by the result.** That is the standard
+error-propagation bound: each term carries its own quantisation error, and those
+errors add regardless of whether the terms themselves do.
+
+```
+tolerance ∝ max( |result|, Σ |Mᵢⱼ · vⱼ| )
+```
+
+### Step 2. Handle cancellation channels, which are the reason step 1 is written that way
+
+A **cancellation channel** is one where large terms sum to a small result — or to
+exactly zero.
+
+A bound proportional to the result is *zero* there, so every such channel fails,
+and no absolute floor chosen without looking at the terms can be justified.
+Worse, these are not a corner case: **every out-of-gamut colour produces one.** A
+colour on the edge of a gamut is precisely one whose coordinates in the other
+space cancel to zero in some channel, so they recur constantly once white
+balance, saturated film curves, or any wide-gamut work is in the pipeline.
+
+The measured instance in this project: an ACEScg patch chosen to lie outside
+sRGB has a red channel that is the sum of terms of magnitude 0.25 coming to
+exactly 0. The accumulated half-float error is 2.8e-4 against an expected value
+of zero. The sum-of-contributions bound predicts 4.9e-4 and passes with margin;
+a bound on the result predicts 0 and cannot pass at all.
+
+### Step 3. Carry the bound across any nonlinearity by its local slope
+
+A bound derived in linear light is not a bound on an encoded value. Multiply by
+`|f'(x)|` at the point in question.
+
+This matters more than it sounds. The sRGB OETF's slope is **12.92** on its
+linear segment near black and about **0.44** near white — a factor of thirty
+across the range — so a single constant cannot be right at both ends. A bound
+that is correct near white is thirty times too tight near black, which is exactly
+where shadow detail lives and where a genuine error is most likely to be reported
+as noise.
+
+The same applies to ACEScct, to any characteristic curve, and to a tone map when
+one exists.
+
+### Step 4. Prove the bound has margin, by mutation
+
+A tolerance nobody has tested against a real error is a guess that happens to be
+written down.
+
+Perturb one coefficient — a tenth of a percent is a reasonable target — confirm
+the test fails, and record the smallest error it catches. If it does not fail,
+the test is not measuring what its name claims and the design is wrong, not the
+tolerance. That is how the round-trip blindness in §4 was found: the mutation
+passed.
+
+Then add a headroom factor for the things not modelled — the rasteriser's `pow`
+differing from JavaScript's, fp32 rounding order, SwiftShader's LLVM and Subzero
+backends disagreeing in the last place. A factor of two over the derived bound
+has been sufficient throughout; state it as headroom rather than folding it in
+silently, so a later reader can tell the prediction from the padding.
+
+### Worked instance
+
+`tests/render/agreement.spec.ts` carries this as `rowTolerance` and
+`encodeSlope`. Leg 1 bounds an RGBA16F intermediate directly. Leg 2 derives its
+bound on the linear side of the display transform and carries it across the sRGB
+OETF by `encodeSlope`, because the value it can actually measure is the encoded
+one.
+
+## 6. Context and precision
 
 - Working space is **ACEScg**, linear, AP1 primaries. Intermediates are
   **RGBA16F**, never RGBA32F.

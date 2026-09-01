@@ -130,6 +130,22 @@ linear light would be correct, and would reintroduce exactly the
 here so that it is a decision rather than a surprise when export lands at
 Stage 5.
 
+**A second, smaller assumption in the same call.** Decoding uses
+`colorSpaceConversion: 'none'`, which hands over the file's own values rather than
+letting the browser convert an embedded profile to sRGB. That is right — the
+conversion would be an uncontrolled colour transform in the middle of a pipeline
+whose whole point is controlling them — but it means ingest interprets everything
+as sRGB, so a **Display P3**-tagged photograph is read undersaturated.
+
+The mitigation is known and cheap, and is scoped rather than open: read the ICC
+profile from the file, and select a different ingest matrix. `primaries.ts`
+already derives its matrices from chromaticities, so adding P3 is a set of
+chromaticities and a second `const mat3` in the shader, chosen by the same
+compile-time variant mechanism the display transform already uses. No
+architectural change, no new stage, no change to the uniform contract. It is not
+done yet because nothing in the pipeline needs it before the film stage, not
+because it is unresolved.
+
 **Every spatial parameter is normalised against image dimensions.** Grain size,
 blur radius, aberration offset, vignette falloff. A radius expressed in pixels
 looks different on a 2048px proxy than on a 6000px export, so preview would lie

@@ -50,9 +50,17 @@ import { proxySize } from './decodeProtocol'
 async function decode(blob: Blob): Promise<Omit<DecodeSuccess, 'id' | 'ok'>> {
   // `imageOrientation: 'from-image'` applies EXIF rotation during decode, so
   // nothing downstream ever sees the unrotated shape and no pass needs an
-  // orientation transform. `colorSpaceConversion: 'none'` stops the browser
-  // converting an embedded profile, which would silently change the values the
-  // pipeline assumes are sRGB.
+  // orientation transform.
+  //
+  // `colorSpaceConversion: 'none'` stops the browser converting an embedded
+  // profile, which would be an uncontrolled colour transform in the middle of a
+  // pipeline whose entire point is controlling them. The consequence is that
+  // ingest interprets every file as sRGB, so a Display P3 photograph is read
+  // undersaturated. The fix is scoped, not open: read the ICC profile and pick a
+  // different ingest matrix. `primaries.ts` derives its matrices from
+  // chromaticities already, so P3 is a set of chromaticities and a second
+  // `const mat3` selected by the compile-time variant mechanism the display pass
+  // already uses. See docs/ARCHITECTURE.md §4.
   const full = await createImageBitmap(blob, {
     imageOrientation: 'from-image',
     colorSpaceConversion: 'none',
