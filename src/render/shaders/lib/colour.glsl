@@ -96,3 +96,70 @@ const mat3 ACESCG_TO_SRGB = mat3(
     -0.6217921207, 1.1408047366, -0.1289689761,   // column 1
     -0.0832588720, -0.0105483191, 1.1529723329    // column 2
 );
+
+// ---------------------------------------------------------------------------
+// ACEScct
+// ---------------------------------------------------------------------------
+//
+// Transliterated from src/core/colour/transfer.ts. ACEScct rather than ACEScc
+// because ACEScc is pure log all the way down and diverges at zero; ACEScct has
+// a linear toe below the break point, so a black pixel and a negative one both
+// pass through it finite. That is not an edge case in a photograph, and it is
+// exactly what a contrast slope above 1 produces in the shadows.
+//
+// A and B are not free parameters. A is the slope the log segment already has at
+// the break point, and B is whatever makes the two segments meet there; both
+// derivations are asserted against the log function in tests/unit/transfer.test.ts
+// rather than trusted as transcribed values.
+
+const float ACESCCT_X_BRK = 0.0078125;
+const float ACESCCT_Y_BRK = 0.155251141552511;
+const float ACESCCT_A = 10.5402377416545;
+const float ACESCCT_B = 0.0729055341958355;
+const float ACESCCT_LOG_OFFSET = 9.72;
+const float ACESCCT_LOG_SCALE = 17.52;
+const float ACESCCT_MAX_LINEAR = 65504.0;
+
+// (log2(65504) + 9.72) / 17.52, and 0.18 through the encode. Both are written as
+// literals because a GLSL `const` initialiser must be a constant expression and a
+// call to log2() is not one. Generated from src/core/colour/ rather than typed,
+// and the agreement tests would catch a transcription error in either.
+const float ACESCCT_MAX_ENCODED = 1.4679963120;
+const float CONTRAST_PIVOT_ACESCCT = 0.4135884025;
+
+float encodeACEScct(float linear) {
+    if (linear <= ACESCCT_X_BRK) {
+        return ACESCCT_A * linear + ACESCCT_B;
+    }
+    return (log2(linear) + ACESCCT_LOG_OFFSET) / ACESCCT_LOG_SCALE;
+}
+
+float decodeACEScct(float encoded) {
+    if (encoded <= ACESCCT_Y_BRK) {
+        return (encoded - ACESCCT_B) / ACESCCT_A;
+    }
+    if (encoded < ACESCCT_MAX_ENCODED) {
+        return exp2(encoded * ACESCCT_LOG_SCALE - ACESCCT_LOG_OFFSET);
+    }
+    return ACESCCT_MAX_LINEAR;
+}
+
+// Contrast: a slope change about middle grey, applied per channel in ACEScct.
+//
+// Per channel is deliberate and it increases saturation, because steepening each
+// channel independently pushes a colour whose channels were already unequal
+// further apart. Photographic contrast behaves this way — a higher-contrast stock
+// is a more saturated one, because its three layers each have their own steeper
+// curve. src/core/colour/grade.ts carries the argument and the alternative.
+float applyContrast(float linear, float slope) {
+    float encoded = encodeACEScct(linear);
+    return decodeACEScct(CONTRAST_PIVOT_ACESCCT + (encoded - CONTRAST_PIVOT_ACESCCT) * slope);
+}
+
+vec3 applyContrast(vec3 linear, float slope) {
+    return vec3(
+        applyContrast(linear.r, slope),
+        applyContrast(linear.g, slope),
+        applyContrast(linear.b, slope)
+    );
+}

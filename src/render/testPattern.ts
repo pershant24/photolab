@@ -11,6 +11,7 @@
  */
 
 import { ACESCG_TO_SRGB } from '../core/colour/matrices'
+import { MIDDLE_GREY_LINEAR } from '../core/colour/grade'
 import { srgbOetf } from '../core/colour/transfer'
 import { mat3MulVec3 } from '../core/colour/types'
 import type { Vec3 } from '../core/colour/types'
@@ -37,8 +38,26 @@ export interface Patch {
   readonly outOfGamut: boolean
 }
 
-/** Middle grey, encoded. */
-const MID_GREY_ENCODED = 0.4586300108
+/**
+ * Middle grey, encoded.
+ *
+ * **Derived, not transcribed.** The literal that was here originally was
+ * 0.4586300108, which is `0.18 ** (1/2.2)` — the pure gamma-2.2 value, not the
+ * sRGB piecewise one, which is 0.4613561295. It decoded to 0.1777, so the patch
+ * labelled "middle grey" was 1.26% dark and this test pattern's mid grey was not
+ * mid grey.
+ *
+ * Nothing caught it for two stages, because nothing had asserted *where* middle
+ * grey is: the agreement tests compare the shader against the reference, and
+ * both were given the same wrong number. It surfaced only when the contrast
+ * pivot test asserted that middle grey does not move at any slope, which is the
+ * first assertion that depends on the value being what its label says.
+ *
+ * Confusing the 2.2 approximation with the piecewise definition is the exact
+ * mistake `src/core/colour/transfer.ts` is written to warn about, and it still
+ * happened. Deriving it removes the opportunity.
+ */
+const MID_GREY_ENCODED = srgbOetf(MIDDLE_GREY_LINEAR)
 
 /**
  * Patches whose **ACEScg** value is the specification, not their sRGB input.

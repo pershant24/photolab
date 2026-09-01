@@ -1,3 +1,8 @@
+import { useStore } from 'zustand'
+
+import { EDIT_PARAMETERS } from '../core/state/editState'
+import { editorStore } from '../core/state/editorStore'
+import { ParameterSlider } from './ParameterSlider'
 import { Viewport } from './Viewport'
 
 /**
@@ -16,11 +21,58 @@ export function App() {
           <Viewport />
         </section>
 
-        <aside
-          className="w-72 shrink-0 border-l border-hairline bg-surface-raised"
-          aria-label="Adjustments"
-        />
+        <Adjustments />
       </main>
     </div>
+  )
+}
+
+/**
+ * Deliberately unstyled beyond what makes it usable. The point of this stage is
+ * to drag a slider and look at a photograph, and any effort spent on the panel
+ * is effort not spent on the pipeline.
+ */
+function Adjustments() {
+  const canUndo = useStore(editorStore, (state) => state.past.length > 0)
+  const canRedo = useStore(editorStore, (state) => state.future.length > 0)
+
+  return (
+    <aside
+      className="flex w-72 shrink-0 flex-col border-l border-hairline bg-surface-raised"
+      aria-label="Adjustments"
+    >
+      {EDIT_PARAMETERS.map((descriptor) => (
+        <ParameterSlider key={descriptor.key} descriptor={descriptor} />
+      ))}
+
+      <div className="mt-auto flex gap-2 border-t border-hairline px-4 py-3 text-xs">
+        <button
+          type="button"
+          data-testid="undo"
+          disabled={!canUndo}
+          onClick={() => editorStore.getState().undo()}
+          className="rounded border border-hairline px-2 py-1 text-ink disabled:opacity-40"
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          data-testid="redo"
+          disabled={!canRedo}
+          onClick={() => editorStore.getState().redo()}
+          className="rounded border border-hairline px-2 py-1 text-ink disabled:opacity-40"
+        >
+          Redo
+        </button>
+        <button
+          type="button"
+          data-testid="reset"
+          onClick={() => editorStore.getState().reset()}
+          className="ml-auto rounded border border-hairline px-2 py-1 text-ink"
+        >
+          Reset
+        </button>
+      </div>
+    </aside>
   )
 }

@@ -64,15 +64,22 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'testPattern',
     'imageSource',
     'ingest',
+    'exposure',
+    'contrast',
     'display',
   ])
 
-  // Three passes run with no image loaded: imageSource is disabled, and a
-  // disabled pass costs neither a program nor a draw.
+  // Three of the six passes run at the default edit: imageSource is disabled
+  // with no image, and exposure and contrast are disabled at their identity
+  // values. A disabled pass costs neither a program nor a draw.
   expect(counts.afterFirstFrame, 'one program per enabled pass').toBe(3)
-  expect(counts.afterDrag, '60 frames of a moving parameter must compile nothing').toBe(3)
-  expect(counts.afterVariant, 'a compile-time variant compiles exactly once').toBe(4)
-  expect(counts.afterReturningToKnownVariant, 'a known variant is reused').toBe(4)
+
+  // The drag moves exposure off zero, which enables a pass that was skipped —
+  // the one thing EditState legitimately changes about graph structure. That
+  // compiles once, on first use, and never again however long the drag runs.
+  expect(counts.afterDrag, 'enabling a pass compiles it once, not once per frame').toBe(4)
+  expect(counts.afterVariant, 'a compile-time variant compiles exactly once more').toBe(5)
+  expect(counts.afterReturningToKnownVariant, 'a known variant is reused').toBe(5)
 
   // The chain ping-pongs through two buffers however many passes it has, and a
   // steady state allocates none: at proxy size that would be hundreds of

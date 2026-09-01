@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { RenderGraphError, orderPasses } from '../../src/render/graph'
 import { STAGES } from '../../src/render/passes/types'
 import type { Pass, Stage } from '../../src/render/passes/types'
+import { contrastPass } from '../../src/render/passes/contrast'
 import { displayPass } from '../../src/render/passes/display'
+import { exposurePass } from '../../src/render/passes/exposure'
+import { imageSourcePass } from '../../src/render/passes/imageSource'
 import { ingestPass } from '../../src/render/passes/ingest'
 import { testPatternPass } from '../../src/render/passes/testPattern'
 
@@ -80,11 +83,50 @@ describe('pass ordering', () => {
   it('places the real passes correctly from a deliberately shuffled registration', () => {
     // The renderer registers these out of order on purpose, so that this asserts
     // the sort rather than restating an already-ordered array.
-    expect(orderPasses([displayPass, testPatternPass, ingestPass]).map((p) => p.id)).toEqual([
+    const shuffled = [
+      displayPass,
+      contrastPass,
+      testPatternPass,
+      imageSourcePass,
+      exposurePass,
+      ingestPass,
+    ]
+    expect(orderPasses(shuffled).map((p) => p.id)).toEqual([
       'testPattern',
+      'imageSource',
       'ingest',
+      'exposure',
+      'contrast',
       'display',
     ])
+  })
+
+  it('keeps exposure and contrast apart, with the empty stages between them', () => {
+    // Easy to get backwards, and a later refactor could collapse them without
+    // anything else noticing. Exposure describes the light arriving at the lens;
+    // contrast is a colourist interpreting a developed negative. They sit next to
+    // each other in the interface and must not sit next to each other in the
+    // graph.
+    expect(exposurePass.stage).toBe('scene')
+    expect(contrastPass.stage).toBe('grade')
+
+    // Stated as the property rather than as two string comparisons: whatever
+    // arrives in the lens and film stages must run between them.
+    const lens = fakePass('someLensEffect', 'lens')
+    const film = fakePass('someFilmEffect', 'film')
+    const order = orderPasses([contrastPass, film, exposurePass, lens]).map((p) => p.id)
+
+    expect(order).toEqual(['exposure', 'someLensEffect', 'someFilmEffect', 'contrast'])
+    expect(order.indexOf('exposure')).toBeLessThan(order.indexOf('contrast'))
+  })
+
+  it('leaves the stages between them empty today, which is correct', () => {
+    // A guard against the reading that the gap is an accident. If a pass is ever
+    // added to lens or film, this test should be updated deliberately rather
+    // than discovered failing.
+    const real = [testPatternPass, imageSourcePass, ingestPass, exposurePass, contrastPass, displayPass]
+    expect(real.filter((p) => p.stage === 'lens')).toEqual([])
+    expect(real.filter((p) => p.stage === 'film')).toEqual([])
   })
 
   it('has every stage available as an insertion point from the start', () => {

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import { ProgramCache, ShaderCompileError } from '../../src/render/gl/program'
 import type { ProgramGL } from '../../src/render/gl/program'
+import { contrastPass } from '../../src/render/passes/contrast'
 import { displayPass } from '../../src/render/passes/display'
+import { exposurePass } from '../../src/render/passes/exposure'
 import { ingestPass } from '../../src/render/passes/ingest'
 import { testPatternPass } from '../../src/render/passes/testPattern'
 import type { RenderInput } from '../../src/render/passes/types'
@@ -67,10 +69,12 @@ function stubGL(options: { linkFails?: boolean; compileFails?: boolean } = {}): 
 
 const VERTEX = 'void main() { gl_Position = vec4(0.0); }'
 
-function input(overrides: { displayMode?: 'sdr' | 'identity'; exposure?: number } = {}): RenderInput {
+function input(
+  overrides: { displayMode?: 'sdr' | 'identity'; exposure?: number; contrast?: number } = {},
+): RenderInput {
   return {
     source: { kind: 'pattern' },
-    edit: { exposure: overrides.exposure ?? 0, contrast: 1 },
+    edit: { exposure: overrides.exposure ?? 0, contrast: overrides.contrast ?? 1 },
     view: { displayMode: overrides.displayMode ?? 'sdr' },
   }
 }
@@ -165,24 +169,26 @@ describe('the recompile boundary the real passes sit on', () => {
   // stringifying a whole state object, say — so these assert the exact compile
   // count rather than merely that it did not grow.
   //
-  // The parameter driven here is `exposure`, which no pass consumes yet: the
-  // exposure and contrast passes land in part D. Until they do, this asserts
-  // that no *existing* pass keys on an EditState value, which is weaker than it
-  // will be. It strengthens on its own once those passes exist.
-  const PASSES = [testPatternPass, ingestPass, displayPass]
+  // Both parameters driven here are consumed by a pass, so the assertion covers
+  // the real path from a slider to a program rather than an inert value.
+  const PASSES = [testPatternPass, ingestPass, exposurePass, contrastPass, displayPass]
 
   it('compiles nothing extra across a drag of a runtime parameter', () => {
     const gl = stubGL()
     const cache = new ProgramCache(gl, VERTEX)
 
     for (let frame = 0; frame < 120; frame++) {
-      const current = input({ exposure: -5 + (10 * frame) / 120 })
+      const current = input({
+        exposure: -5 + (10 * frame) / 120,
+        contrast: 0.5 + frame / 120,
+      })
       for (const pass of PASSES) {
         cache.get(pass.id, pass.variantKey(current), pass.fragmentSource(current))
       }
     }
 
-    // Exactly one program per pass, for 120 frames of a moving parameter.
+    // Exactly one program per pass, for 120 frames of two moving parameters that
+    // passes actually read.
     expect(cache.compileCount).toBe(PASSES.length)
   })
 
@@ -197,15 +203,15 @@ describe('the recompile boundary the real passes sit on', () => {
     }
 
     build(input({ displayMode: 'sdr' }))
-    expect(cache.compileCount).toBe(3)
+    expect(cache.compileCount).toBe(PASSES.length)
 
     build(input({ displayMode: 'identity' }))
-    expect(cache.compileCount).toBe(4)
+    expect(cache.compileCount).toBe(PASSES.length + 1)
 
     // Returning to a variant already built compiles nothing.
     build(input({ displayMode: 'sdr' }))
     build(input({ displayMode: 'identity' }))
-    expect(cache.compileCount).toBe(4)
+    expect(cache.compileCount).toBe(PASSES.length + 1)
   })
 
   it('gives the two display variants genuinely different source', () => {
@@ -226,7 +232,7 @@ describe('the recompile boundary the real passes sit on', () => {
     for (const pass of PASSES) {
       const keys = new Set<string>()
       for (let i = 0; i < 50; i++) {
-        keys.add(pass.variantKey(input({ exposure: -5 + (10 * i) / 50 })))
+        keys.add(pass.variantKey(input({ exposure: -5 + (10 * i) / 50, contrast: i / 25 })))
       }
       expect(keys.size, `${pass.id} varies its variant key with an EditState value`).toBe(1)
     }

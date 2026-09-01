@@ -102,6 +102,32 @@ identical on macOS arm64 and `ubuntu-latest`:
 Re-run it with `npm run probe:webgl` after any Playwright upgrade. It prints the
 full capability dump whether or not it passes.
 
+## Deferred assertions
+
+Tests that are specified but not yet written, because writing them now would pass
+without measuring anything. A test that passes vacuously is worse than an absent
+one: it reports coverage that does not exist, and nobody re-examines a green test.
+
+Kept here rather than as comments in the files that would contain them. A comment
+in one test file is invisible to anyone reading a different one, which is exactly
+how a deferral survives — by being hard to see.
+
+| Deferred | Why it would be vacuous | Lands in |
+|---|---|---|
+
+*(empty — both entries closed in Stage 4 Part D)*
+
+The two that were here were the renderer-level purity check and two-resolution
+agreement for exposure and contrast. Both needed passes that consume an
+`EditState` value, and both now exist: `tests/render/grade.spec.ts` asserts that
+two routes to one `EditState` produce byte-identical frames, and
+`tests/render/loop.spec.ts` asserts the two proxy resolutions agree with both
+passes engaged.
+
+Every entry must name the part that closes it. An entry with no landing point is
+not a deferral, it is a decision not to test something, and it belongs in the
+prose above rather than in this table.
+
 ## Frame timing
 
 `tests/probe/frame-timing.spec.ts` measures the interactive chain at several
@@ -134,11 +160,53 @@ revisited rather than merely inherited:
   spatial kernels, which are many taps per pixel rather than one. These figures
   are a floor for a pipeline that does almost nothing.
 
-**Revisit at Milestone 3**, once the film and lens stages are real and the
-numbers describe the pipeline that will ship. If a full-resolution drag is still
-comfortably inside budget on the slowest device worth supporting, delete the
-proxy: it is about thirty lines in `renderer.ts` and its tests, and it degrades
-the image on every drag for hardware that does not need it.
+### What this measurement does not constrain
+
+**0.97 ms for 12MP through three per-pixel passes is a memory bandwidth figure,
+not a measurement of this pipeline.** Three passes that read one texel, do a
+handful of arithmetic operations and write one texel are bandwidth-bound: the
+number describes how fast the hardware can move 12 megapixels through memory
+four times, and it would be about the same for almost any trivial shader. It says
+nothing about what the code costs, because the code costs almost nothing.
+
+The chain that ships will not be bandwidth-bound. Halation, bloom and diffusion
+are **multi-tap spatial kernels**, and their cost is per tap: a Gaussian at a
+radius worth having is one to two orders of magnitude more arithmetic per pixel
+than anything measured here. That chain is compute-bound, and **no scaling of a
+bandwidth-bound number predicts a compute-bound one.** Multiplying 0.97 ms by the
+pass count would be a guess dressed as an extrapolation.
+
+**Revisit once the chain contains at least one multi-tap kernel at a realistic
+radius** — halation, at Milestone 3 — and not before. At that point the figure
+describes the pipeline rather than the memory bus.
+
+Note that the **SwiftShader column is the more informative one** for this
+purpose. A software rasteriser is compute-bound already, so it is the closer
+model of what a real GPU will look like once the chain does real work per pixel.
+Its 49 ms at the 2048px proxy budget is the number to watch.
+
+If a full-resolution drag is still comfortably inside budget on the slowest
+device worth supporting once that measurement exists, delete the proxy: it is
+about thirty lines in `renderer.ts` and its tests.
+
+### What the proxy costs, measured
+
+Halving each axis loses **63% of high-frequency detail**. Measured 2026-09-01 on
+a 3000x2000 source carrying fine texture, comparing mean absolute Laplacian at
+the same display resolution — the proxy render upscaled the way the browser
+composites it, so the comparison is like for like rather than counting a smaller
+image's sharper per-pixel edges:
+
+| | Buffer | Mean abs. Laplacian |
+|---|---|---|
+| Full | 1112x741 | 4.196 |
+| Drag proxy, upscaled to display size | 556x371 | 1.554 |
+
+So the present trade is: **lose roughly two thirds of the fine detail during
+every drag, to save 0.7 ms of a frame that had 15.7 ms spare.** That is a poor
+bargain on this hardware, and it is visible on textured subjects rather than
+theoretical. It is the cost side of the decision above, and it is why the
+revisit should happen promptly once halation makes the benefit side real.
 
 ### Measuring this correctly
 

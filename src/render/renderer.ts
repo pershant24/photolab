@@ -18,6 +18,8 @@ import { RenderGraph } from './graph'
 import { testPatternPass } from './passes/testPattern'
 import { imageSourcePass } from './passes/imageSource'
 import { ingestPass } from './passes/ingest'
+import { exposurePass } from './passes/exposure'
+import { contrastPass } from './passes/contrast'
 import { displayPass } from './passes/display'
 import type { PassContext, RenderInput, RenderSource, ViewState } from './passes/types'
 import { DEFAULT_VIEW_STATE } from './passes/types'
@@ -80,8 +82,10 @@ export class Renderer {
       // Deliberately listed out of order here so that the ordering test is
       // asserting something rather than restating the array.
       displayPass,
+      contrastPass,
       testPatternPass,
       imageSourcePass,
+      exposurePass,
       ingestPass,
     ])
 

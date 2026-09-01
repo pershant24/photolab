@@ -8,7 +8,7 @@ import { expect, test } from '@playwright/test'
  */
 
 interface RendererLike {
-  graph: { compileCount: number; allocationCount: number }
+  graph: { compileCount: number; allocationCount: number; passIds: string[] }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
   renderCount: number
   interacting: boolean
@@ -191,7 +191,18 @@ test.describe('drag proxy', () => {
         const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
 
         renderer.stop()
+
+        // Warm every pass the drag will use before the count starts. Enabling a
+        // pass for the first time legitimately compiles it; that is a graph
+        // structure change, not a resolution change, and it is measured by
+        // plumbing.spec.ts. What must compile nothing is the proxy switch, and
+        // mixing the two would let a real regression hide behind an expected
+        // increment.
+        store.getState().setParameter('exposure', 1)
         renderer.renderNow()
+        store.getState().setParameter('exposure', 0)
+        renderer.renderNow()
+
         const before = renderer.graph.compileCount
         const allocationsBefore = renderer.graph.allocationCount
 
@@ -230,17 +241,31 @@ test.describe('drag proxy', () => {
     expect(counts.allocationsAfter - counts.allocationsBefore).toBeLessThanOrEqual(4)
   })
 
-  test('produces the same colours at both proxy resolutions', async ({ page }) => {
-    // An early instance of the two-resolution invariant. Every pass in the chain
-    // today is per-pixel, so the two must agree to within the encode's rounding;
-    // a pass that read uResolution where it should have read uSourceRect would
-    // not. tests/golden/two-resolution.spec.ts carries the spatial-effect
-    // version once there are spatial effects to carry.
-    const { full, proxy } = await page.evaluate(() => {
+  test('produces the same colours at both proxy resolutions, with both passes engaged', async ({
+    page,
+  }) => {
+    // The two-resolution invariant, with exposure and contrast actually running
+    // rather than only ingest and display. Both are per-pixel functions of the
+    // value at that pixel, so neither may consult the buffer's resolution and
+    // the two sizes must agree to within where they round.
+    //
+    // A pass that reached for uResolution where it should have used uSourceRect
+    // would fail here, and that is not hypothetical: the uniform contract carried
+    // exactly that defect until it was found in Stage 3, where the expression
+    // that appeared to use the image size cancelled down to using the buffer's.
+    //
+    // tests/golden/two-resolution.spec.ts carries the spatial-effect version
+    // once there are spatial effects, where the answer is a resampled image
+    // comparison rather than an equality.
+    const { full, proxy, fullSize, proxySize, passIds } = await page.evaluate(() => {
       const renderer = (window as unknown as { __photolabRenderer: RendererLike })
         .__photolabRenderer
       const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
       renderer.stop()
+
+      // Both passes off their identity values, so both are in the chain.
+      store.getState().setParameter('exposure', 1.35)
+      store.getState().setParameter('contrast', 1.4)
 
       const gl = renderer.context.gl
       const canvas = renderer.context.canvas
@@ -267,15 +292,22 @@ test.describe('drag proxy', () => {
 
       renderer.renderNow()
       const full = sample()
+      const fullSize: [number, number] = [canvas.width, canvas.height]
 
       store.getState().beginInteraction()
       renderer.renderNow()
       const proxy = sample()
+      const proxySize: [number, number] = [canvas.width, canvas.height]
       store.getState().endInteraction()
 
-      return { full, proxy }
+      return { full, proxy, fullSize, proxySize, passIds: renderer.graph.passIds }
     })
 
+    // The comparison is only meaningful if the resolutions actually differed and
+    // both passes actually ran.
+    expect(proxySize[0], 'the proxy must be a different resolution').toBeLessThan(fullSize[0])
+    expect(passIds).toContain('exposure')
+    expect(passIds).toContain('contrast')
     expect(proxy).toHaveLength(full.length)
     const failures: string[] = []
     for (let i = 0; i < full.length; i++) {
