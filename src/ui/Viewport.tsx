@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { editorStore } from '../core/state/editorStore'
+import type { EditorStoreState } from '../core/state/editorStore'
 import { RendererUnsupportedError } from '../render/gl/context'
 import { ImageLoader, isSupersededError } from '../render/imageLoader'
 import { Renderer } from '../render/renderer'
@@ -58,8 +59,18 @@ export function Viewport() {
     // The store is the only writer of edit parameters, and the renderer is a
     // reader of it. Nothing else pushes state in, so there is one path from a
     // pointer event to a pixel and no way for the two to disagree.
-    renderer.setEdit(editorStore.getState().edit)
-    const unsubscribeStore = editorStore.subscribe((next) => renderer.setEdit(next.edit))
+    //
+    // The drag proxy is derived from the same signal that coalesces history,
+    // rather than wired separately from pointer events. A control only has to
+    // tell the store a gesture is in progress; the reduced resolution and the
+    // single undo entry both follow from that one fact, and they cannot
+    // disagree about when a drag started.
+    const publish = (next: EditorStoreState): void => {
+      renderer.setEdit(next.edit)
+      renderer.setInteracting(next.interactionBaseline !== null)
+    }
+    publish(editorStore.getState())
+    const unsubscribeStore = editorStore.subscribe(publish)
 
     const unsubscribe = renderer.context.onStatusChange((next) => setContextLost(next === 'lost'))
 
@@ -79,9 +90,14 @@ export function Viewport() {
     })
     observer.observe(container)
 
-    // Reached by the browser tests, which need the graph's counters and the
-    // image path. Development-time only; it is not an API.
-    ;(window as unknown as { __photolabRenderer?: Renderer }).__photolabRenderer = renderer
+    // Reached by the browser tests, which need the graph's counters, the image
+    // path and the store. Development-time only; it is not an API.
+    const hooks = window as unknown as {
+      __photolabRenderer?: Renderer
+      __photolabStore?: typeof editorStore
+    }
+    hooks.__photolabRenderer = renderer
+    hooks.__photolabStore = editorStore
 
     return () => {
       observer.disconnect()
@@ -90,7 +106,8 @@ export function Viewport() {
       loader.dispose()
       renderer.dispose()
       sessionRef.current = null
-      delete (window as unknown as { __photolabRenderer?: Renderer }).__photolabRenderer
+      delete hooks.__photolabRenderer
+      delete hooks.__photolabStore
     }
   }, [])
 

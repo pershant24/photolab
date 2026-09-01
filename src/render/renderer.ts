@@ -35,6 +35,29 @@ import { uploadImageTexture } from './gl/texture'
  */
 const NOMINAL_SOURCE_LONG_EDGE = 4096
 
+/**
+ * Linear scale applied to the drawing buffer while a drag is in progress.
+ *
+ * Half on each axis is a quarter of the pixels and therefore roughly a quarter
+ * of the fragment work, which is the dominant cost in a chain of full-screen
+ * passes. Half is also the largest reduction that stays unobtrusive: the browser
+ * upscales it bilinearly, and at 2x the result reads as slightly soft rather
+ * than as blocky.
+ *
+ * **Whether this is needed at all is a measurement, and the measurement says it
+ * currently is not.** A full-resolution 12MP frame costs 0.97 ms on an Apple M5
+ * against a 16.7 ms budget, so halving the resolution saves 0.7 ms of a frame
+ * with 15.7 ms spare, and costs a visibly softer image throughout every drag.
+ *
+ * It is kept because that figure is from one fast GPU and the chain it measures
+ * is three passes; the film and lens stages arriving next are the expensive kind,
+ * with spatial kernels rather than one tap per pixel. `tests/README.md` records
+ * the full table and the condition for deleting this: if a full-resolution drag
+ * is still inside budget on the slowest device worth supporting once the real
+ * chain exists, this should go.
+ */
+export const DRAG_PROXY_SCALE = 0.5
+
 
 
 export class Renderer {
@@ -43,6 +66,8 @@ export class Renderer {
   #edit: EditState = DEFAULT_EDIT_STATE
   #view: ViewState = DEFAULT_VIEW_STATE
   #source: RenderSource = { kind: 'pattern' }
+  #interacting = false
+  #renderCount = 0
   #frame: number | null = null
   #dirty = true
   #unsubscribe: () => void
@@ -124,6 +149,18 @@ export class Renderer {
    * own client size once an image is loaded: the canvas is letterboxed to the
    * image's aspect ratio, so measuring it would feed its own previous size back
    * in and it would never grow again. The caller measures the container.
+   *
+   * The drag proxy is applied here, and it is applied to the **drawing buffer
+   * only**. The CSS size is computed from the full-quality dimensions and does
+   * not change, so the element does not move or reflow when a drag starts; the
+   * browser upscales the smaller buffer to fill it. That is why the drag proxy
+   * needs no extra pass and no blit: it is a resolution change, not a
+   * composition change.
+   *
+   * `uSourceRect` is untouched by any of this. The buffer covers the same region
+   * of the same source either way — only how many samples it covers it with
+   * changes — which is exactly the distinction the uniform contract exists to
+   * make. See docs/SHADER_CONVENTIONS.md §1.
    */
   syncSize(available?: { readonly width: number; readonly height: number }): boolean {
     const canvas = this.#context.canvas
@@ -133,15 +170,43 @@ export class Renderer {
       Math.max(1, Math.round(box.width * ratio)),
       Math.max(1, Math.round(box.height * ratio)),
     ]
-    const [width, height] = this.#fitToSource(availablePixels[0], availablePixels[1])
+    const [displayWidth, displayHeight] = this.#fitToSource(
+      availablePixels[0],
+      availablePixels[1],
+    )
+
+    const scale = this.#interacting ? DRAG_PROXY_SCALE : 1
+    const width = Math.max(1, Math.round(displayWidth * scale))
+    const height = Math.max(1, Math.round(displayHeight * scale))
+
+    // Written unconditionally: the CSS size is what the drag proxy must not
+    // change, and leaving it stale after a resize that only altered the buffer
+    // would letterbox the image against its own previous dimensions.
+    canvas.style.width = `${displayWidth / ratio}px`
+    canvas.style.height = `${displayHeight / ratio}px`
 
     if (canvas.width === width && canvas.height === height) return false
     canvas.width = width
     canvas.height = height
-    canvas.style.width = `${width / ratio}px`
-    canvas.style.height = `${height / ratio}px`
     this.#dirty = true
     return true
+  }
+
+  /**
+   * Enter or leave the reduced-resolution drag proxy.
+   *
+   * Called on pointer-down and pointer-up, not per movement: the two size
+   * changes per gesture each reallocate the drawing buffer and the pooled
+   * targets, which is affordable twice and not affordable per frame.
+   */
+  setInteracting(active: boolean): void {
+    if (this.#interacting === active) return
+    this.#interacting = active
+    this.#dirty = true
+  }
+
+  get interacting(): boolean {
+    return this.#interacting
   }
 
   get source(): RenderSource {
@@ -236,10 +301,23 @@ export class Renderer {
     ]
   }
 
+  /**
+   * Frames actually drawn.
+   *
+   * Exposed so that the coalescing rule can be asserted as a number rather than
+   * inspected. Sixty state changes inside one frame must produce **one** render;
+   * a count is the only way to tell that apart from sixty renders that happen to
+   * end at the same image.
+   */
+  get renderCount(): number {
+    return this.#renderCount
+  }
+
   /** Render immediately, outside the frame loop. Used by tests and by resize. */
   renderNow(available?: { readonly width: number; readonly height: number }): void {
     if (this.#disposed) return
     this.syncSize(available)
+    this.#renderCount += 1
     this.#graph.render(this.input, this.passContext())
   }
 

@@ -102,6 +102,62 @@ identical on macOS arm64 and `ubuntu-latest`:
 Re-run it with `npm run probe:webgl` after any Playwright upgrade. It prints the
 full capability dump whether or not it passes.
 
+## Frame timing
+
+`tests/probe/frame-timing.spec.ts` measures the interactive chain at several
+resolutions on a 12MP source. Measured 2026-09-01, ingest + display only — no
+scene, lens, film or grade passes exist yet.
+
+| Resolution | Pixels | Apple M5 (Metal) | SwiftShader (LLVM) |
+|---|---|---|---|
+| 512x384 | 0.2 MP | 0.095 ms | 5.6 ms |
+| 1024x768 | 0.79 MP | 0.068 ms | 16.5 ms |
+| 2048x1536 | 3.15 MP | 0.244 ms | 49.0 ms |
+| **4000x3000 (full source)** | **12 MP** | **0.97 ms** | **145 ms** |
+
+The 60Hz budget is 16.7 ms.
+
+**On this hardware the drag proxy currently buys nothing.** A full 12MP frame
+costs under a millisecond, six per cent of the budget, so halving the resolution
+saves about 0.7 ms of a frame that had 15.7 ms spare — and costs a visibly softer
+image for the duration of every drag.
+
+It is kept anyway, and the reasons are worth stating so the decision can be
+revisited rather than merely inherited:
+
+- **An M5 is not the target floor.** `CLAUDE.md`'s memory budget exists because
+  integrated and mobile GPUs are a real target, and one an order of magnitude
+  slower puts a full-resolution 12MP frame at 10 ms and a 24MP frame past
+  budget. There is no measurement from such a device yet.
+- **The chain is three passes and about to become a dozen**, and the ones
+  arriving are the expensive kind: halation, grain, bloom and diffusion all have
+  spatial kernels, which are many taps per pixel rather than one. These figures
+  are a floor for a pipeline that does almost nothing.
+
+**Revisit at Milestone 3**, once the film and lens stages are real and the
+numbers describe the pipeline that will ship. If a full-resolution drag is still
+comfortably inside budget on the slowest device worth supporting, delete the
+proxy: it is about thirty lines in `renderer.ts` and its tests, and it degrades
+the image on every drag for hardware that does not need it.
+
+### Measuring this correctly
+
+**`gl.finish()` does not synchronise under ANGLE/SwiftShader**, and it fails
+silently rather than erroring. Timed with `gl.finish()` as the barrier, 400
+frames at 2048x1536 "completed" in 1.6 ms — four microseconds for three
+full-screen passes over three megapixels. The same work terminated by a
+one-pixel `readPixels`, which cannot be deferred because its result is returned
+synchronously, took 305 ms per frame. Both numbers came from the same code on
+the same machine minutes apart, and the first was entirely fictional.
+
+Any future timing work should use a readback as the barrier. It costs about 3 ms
+on its own, so the frame count is chosen to make each run roughly a second long.
+
+Note also that **headless Chromium uses SwiftShader even on a machine with a
+GPU.** Reaching the platform driver needs a headed browser and
+`--use-angle=metal`; the renderer string in the probe's output says which was
+actually used, and it should be read before trusting any figure.
+
 ## Golden images and the SwiftShader backend
 
 Golden tests run on SwiftShader, forced via `--use-gl=angle
