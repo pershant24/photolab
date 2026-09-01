@@ -163,3 +163,55 @@ vec3 applyContrast(vec3 linear, float slope) {
         applyContrast(linear.b, slope)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Display transform: tone mapping and gamut compression
+// ---------------------------------------------------------------------------
+//
+// Transliterated from src/core/colour/display.ts, which carries the argument for
+// the operator and for the per-channel decision. Both stages share one shoulder,
+// and both are parameterised by uniforms rather than constants, so tuning either
+// is a uniform update and never a recompile.
+
+// Identity up to `knee`, then a hyperbolic approach to `limit` that never reaches
+// it. Meets its linear section with matching slope, so there is no visible edge
+// where the roll-off begins, and is monotone everywhere so ordering is never
+// inverted.
+float shoulder(float x, float knee, float limit) {
+    if (x <= knee) {
+        return x;
+    }
+    float d = limit - knee;
+    return limit - (d * d) / (x - knee + d);
+}
+
+// Per channel, which bleaches bright saturated colours toward white as an
+// emulsion does. Negative input is returned unchanged; gamut compression removes
+// negatives before this runs.
+vec3 toneMap(vec3 linearSrgb, float knee) {
+    return vec3(
+        shoulder(linearSrgb.r, knee, 1.0),
+        shoulder(linearSrgb.g, knee, 1.0),
+        shoulder(linearSrgb.b, knee, 1.0)
+    );
+}
+
+// Scales the whole chroma vector about the achromatic value by a single factor,
+// so its direction — the hue — is unchanged and only saturation falls. Doing
+// this per channel instead shifts hue, sometimes further than clipping does;
+// display.ts records the measurement.
+vec3 gamutCompress(vec3 linearSrgb, float threshold) {
+    float achromatic = max(linearSrgb.r, max(linearSrgb.g, linearSrgb.b));
+    if (achromatic <= 0.0) {
+        return linearSrgb;
+    }
+
+    vec3 distances = (vec3(achromatic) - linearSrgb) / achromatic;
+    float distance = max(distances.r, max(distances.g, distances.b));
+    if (distance <= threshold) {
+        return linearSrgb;
+    }
+
+    float scale = shoulder(distance, threshold, 1.0) / distance;
+    return vec3(achromatic) + scale * (linearSrgb - vec3(achromatic));
+}

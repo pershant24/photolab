@@ -2,41 +2,51 @@
  * Display transform. The last pass, and the only one that knows what the output
  * device is.
  *
- * This pass is where the `displayMode` compile-time variant lives, and it is the
- * example the program cache is built around: switching mode changes the
- * generated source and legitimately compiles, while every runtime parameter in
- * the graph updates a uniform and compiles nothing.
+ * Its two operator stages are compile-time variants and their parameters are
+ * uniforms, which is the recompile boundary in miniature: switching a stage on
+ * changes the generated source and legitimately compiles, while dragging the
+ * knee updates a uniform and compiles nothing.
  */
 
 import fragmentSource from '../shaders/display.frag'
 
-import type { DisplayMode, Pass, RenderInput } from './types'
+import type { Pass, RenderInput, ViewState } from './types'
 
 /**
- * Prepended after `#version`, which the program cache adds. A `#define` is the
- * correct mechanism here rather than a uniform branch: the identity path is a
- * different transform, not a different value, and baking it out keeps the
- * shipping shader free of a branch that exists only for tests.
+ * Prepended after `#version`, which the program cache adds.
+ *
+ * `#define` rather than a uniform branch: each of these is a different transform
+ * rather than a different value, and baking them out keeps the shipping shader
+ * free of branches that exist only so a test can turn them off.
  */
-function defines(mode: DisplayMode): string {
-  return mode === 'identity' ? '#define DISPLAY_IDENTITY\n' : ''
+function defines(view: ViewState): string {
+  if (view.displayMode === 'identity') return '#define DISPLAY_IDENTITY\n'
+  return (
+    (view.gamutCompress ? '#define GAMUT_COMPRESS\n' : '') +
+    (view.toneMap ? '#define TONE_MAP\n' : '')
+  )
 }
 
 export const displayPass: Pass = {
   id: 'display',
   stage: 'display',
 
-  fragmentSource: (input: RenderInput) => defines(input.view.displayMode) + fragmentSource,
+  fragmentSource: (input: RenderInput) => defines(input.view) + fragmentSource,
 
-  // The one thing that changes the source, and therefore the only thing in the
-  // key. If a value can change while the source stays byte-identical it belongs
-  // in a uniform, and putting it here would mean recompiling to set it.
-  variantKey: (input: RenderInput) => input.view.displayMode,
+  // Only the things that change the source. The knee and the threshold are
+  // values, not structure, so they stay out of the key and in uniforms.
+  variantKey: (input: RenderInput) =>
+    input.view.displayMode === 'identity'
+      ? 'identity'
+      : `sdr:${input.view.gamutCompress ? 'g' : '-'}${input.view.toneMap ? 't' : '-'}`,
 
   enabled: () => true,
 
-  bindUniforms() {
-    // Nothing beyond the contract yet. Tone map and gamut compression parameters
-    // arrive here.
+  bindUniforms(gl, locate, input) {
+    const knee = locate('uToneMapKnee')
+    if (knee) gl.uniform1f(knee, input.view.toneMapKnee)
+
+    const threshold = locate('uGamutThreshold')
+    if (threshold) gl.uniform1f(threshold, input.view.gamutThreshold)
   },
 }

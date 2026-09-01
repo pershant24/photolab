@@ -93,6 +93,14 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     label: 'Contrast',
     // A slope of 2 in ACEScct squares the ratio between any two channels in
     // linear light, which is already an extreme grade. 0 flattens to middle grey.
+    //
+    // The range is deliberately NOT narrowed to the 0.8-1.3 that was usable when
+    // this was measured. Above about 1.3 the image was being destroyed — 42% of
+    // a backlit frame blown to flat white at a slope of 1.4 — but that was the
+    // *display path* clipping, not the operator misbehaving: the values were
+    // correct and ordered right up to the point a hard clamp discarded them.
+    // Narrowing the range would have treated a display problem as a parameter
+    // problem, and baked in a limit that a tone map makes wrong.
     min: 0,
     max: 2,
     step: 0.01,

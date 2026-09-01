@@ -10,8 +10,13 @@ import { expect, test } from '@playwright/test'
 interface RendererLike {
   graph: { compileCount: number; allocationCount: number; passIds: string[] }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
+  input: { view: Record<string, unknown> }
   setEdit(next: { exposure: number; contrast: number }): void
-  setView(next: { displayMode: string }): void
+  // Takes a complete ViewState. Passing a partial silently drops the display
+  // operator flags to undefined, which is a different compile-time variant and
+  // therefore a spurious extra compile — this spec measured exactly that before
+  // the calls below were made to merge.
+  setView(next: Record<string, unknown>): void
   renderNow(): void
   stop(): void
 }
@@ -23,7 +28,7 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
   const counts = await page.evaluate(() => {
     const renderer = (window as unknown as { __photolabRenderer: RendererLike }).__photolabRenderer
     renderer.stop()
-    renderer.setView({ displayMode: 'sdr' })
+    renderer.setView({ ...renderer.input.view, displayMode: 'sdr' })
     renderer.renderNow()
 
     const afterFirstFrame = renderer.graph.compileCount
@@ -36,11 +41,11 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     const afterDrag = renderer.graph.compileCount
     const allocationsAfterDrag = renderer.graph.allocationCount
 
-    renderer.setView({ displayMode: 'identity' })
+    renderer.setView({ ...renderer.input.view, displayMode: 'identity' })
     renderer.renderNow()
     const afterVariant = renderer.graph.compileCount
 
-    renderer.setView({ displayMode: 'sdr' })
+    renderer.setView({ ...renderer.input.view, displayMode: 'sdr' })
     renderer.renderNow()
     const afterReturningToKnownVariant = renderer.graph.compileCount
 

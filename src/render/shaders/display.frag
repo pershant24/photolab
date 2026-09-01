@@ -1,31 +1,16 @@
 // Display transform: linear ACEScg in, encoded sRGB out.
 //
-// ## This is the minimal version: PRE-TONE-MAP and PRE-GAMUT-COMPRESSION
+// Three stages, individually compiled in or out so that the matrix can be
+// addressed without the operator in the way:
 //
-// It is ACEScg -> sRGB primaries, a clamp, and the sRGB OETF. The two stages
-// that belong here and are not yet built are named so their absence is a stated
-// gap rather than something to discover later:
+//     ACEScg -> display primaries -> gamut compression -> tone map -> encode
 //
-//   - **Tone mapping.** Values above display white exist throughout this
-//     pipeline and need a curve that brings them down while preserving their
-//     ordering. The clamp below is not that curve; it discards the ordering.
-//   - **Gamut compression.** AP1 holds colours sRGB cannot show. Clamping them
-//     per channel shifts hue, because the channel that clipped moves and the
-//     others do not.
-//
-// Both layer in between the matrix and the OETF without changing this file's
-// structure. Until they do, out-of-range values read as flat crushed shadows and
-// flat blown highlights, which is what "the tone map is not built yet" is
-// supposed to look like.
-//
-// ## The clamp is load-bearing
-//
-// It is not defensive tidying. A contrast control above 1 legitimately pushes
-// near-black pixels negative, because the ACEScct toe is signed. Without the
-// clamp those pixels reach the OETF's odd-symmetric branch, come back negative,
-// and land in an 8-bit canvas as undefined garbage — which reads as "the
-// pipeline is broken" rather than "the tone map is missing". With it they read
-// as crushed black, which is true and is the far more useful lie.
+// Compression before tone mapping. Compression makes a colour representable;
+// tone mapping fits its brightness. Because compression leaves every channel
+// non-negative and the shoulder is bounded below 1, their output is already
+// inside the encodable range and the clamp below is a safety net rather than
+// something the image depends on — which is the whole difference from the
+// clamp-only version this replaces.
 
 precision highp float;
 
@@ -36,22 +21,32 @@ uniform vec2 uResolution;
 uniform vec2 uImageSize;
 uniform vec4 uSourceRect;
 
+uniform float uToneMapKnee;
+uniform float uGamutThreshold;
+
 in vec2 vTexCoord;
 out vec4 fragColour;
 
 void main() {
     vec3 acescg = texture(uSource, vTexCoord).rgb;
+    vec3 linearSrgb = ACESCG_TO_SRGB * acescg;
 
 #ifdef DISPLAY_IDENTITY
-    // Debug path only, and never reachable from ordinary controls. It exists
-    // because an sRGB-in-equals-sRGB-out round trip cannot be verified against a
-    // clamped, tone-mapped output: the check that catches a sign or transpose
-    // error needs an unmodified path to measure.
-    vec3 linearSrgb = ACESCG_TO_SRGB * acescg;
+    // Debug path only, never reachable from ordinary controls. An sRGB round
+    // trip cannot be verified against a tone-mapped output: the check that
+    // catches a sign or transpose error needs an unmodified path to measure, and
+    // the two-leg agreement harness addresses the matrix through this.
     fragColour = vec4(srgbOetf(linearSrgb), 1.0);
 #else
-    vec3 linearSrgb = ACESCG_TO_SRGB * acescg;
-    vec3 clamped = clamp(linearSrgb, 0.0, 1.0);
-    fragColour = vec4(srgbOetf(clamped), 1.0);
+
+#ifdef GAMUT_COMPRESS
+    linearSrgb = gamutCompress(linearSrgb, uGamutThreshold);
+#endif
+
+#ifdef TONE_MAP
+    linearSrgb = toneMap(linearSrgb, uToneMapKnee);
+#endif
+
+    fragColour = vec4(srgbOetf(clamp(linearSrgb, 0.0, 1.0)), 1.0);
 #endif
 }

@@ -3,6 +3,7 @@
  */
 
 import type { EditState } from '../../core/state/editState'
+import { GAMUT_COMPRESS_THRESHOLD, TONE_MAP_KNEE } from '../../core/colour/display'
 import type { RenderTarget } from '../gl/target'
 
 /**
@@ -68,9 +69,34 @@ export type RenderSource =
  */
 export interface ViewState {
   readonly displayMode: DisplayMode
+
+  /**
+   * The display transform's two stages, individually switchable.
+   *
+   * Compile-time, because each changes the generated source. They are separate
+   * switches rather than one because they fix different problems — compression
+   * handles colours too saturated for the display, tone mapping values too
+   * bright — and because the agreement harness needs to address the matrix
+   * without either in the way.
+   */
+  readonly toneMap: boolean
+  readonly gamutCompress: boolean
+
+  /**
+   * Their parameters, which are **runtime**. Tuning either is a uniform update,
+   * so a control on the knee could be dragged without compiling anything.
+   */
+  readonly toneMapKnee: number
+  readonly gamutThreshold: number
 }
 
-export const DEFAULT_VIEW_STATE: ViewState = { displayMode: 'sdr' }
+export const DEFAULT_VIEW_STATE: ViewState = {
+  displayMode: 'sdr',
+  toneMap: true,
+  gamutCompress: true,
+  toneMapKnee: TONE_MAP_KNEE,
+  gamutThreshold: GAMUT_COMPRESS_THRESHOLD,
+}
 
 /**
  * Everything a frame is rendered from.

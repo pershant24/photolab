@@ -44,6 +44,14 @@ value.** That is not hypothetical: `tests/unit/primaries.test.ts` records a real
 6.6e-5 disagreement between two published sRGB matrices, caused by one deriving
 D65 from its chromaticity and the other using the ASTM tabulated white.
 
+**A fixture constant with a semantic label must be derived, never transcribed** —
+`srgbOetf(0.18)`, not `0.46136`. This is the one failure an agreement test
+structurally cannot catch: it checks that two implementations match, not that a
+value handed to both is what its label claims. A patch labelled "middle grey"
+held the gamma-2.2 encoding instead of the sRGB one for two stages, 0.6% wrong,
+with every test green. `docs/SHADER_CONVENTIONS.md` §5 carries the full account
+and the one place transcription is unavoidable.
+
 **Where two independent derivations of the same quantity are cheap, do both and
 assert they agree.** `tests/unit/transfer.test.ts` derives the ACEScct slope
 constant from the log segment rather than trusting the transcribed value;
@@ -225,6 +233,74 @@ Note also that **headless Chromium uses SwiftShader even on a machine with a
 GPU.** Reaching the platform driver needs a headed browser and
 `--use-angle=metal`; the renderer string in the probe's output says which was
 actually used, and it should be read before trusting any figure.
+
+## Display transform, measured against the Stage 4 baseline
+
+Stage 4 ended with a hard clamp as the display path, and D5 recorded what it
+destroyed. The same frames and settings, re-measured with the tone map and gamut
+compression in place, on an Apple M5:
+
+| Frame | Setting | Blown, clamp only | Blown, tone mapped | Crushed, both |
+|---|---|---|---|---|
+| Backlit | contrast 1.2 | 31.4% | **0%** | 3.2% |
+| Backlit | contrast 1.4 | 42.5% | **0%** | 3.3% |
+| Backlit | contrast 1.6 | 48.7% | **0%** | 3.7% |
+| Backlit | +1 EV | 51.6% | **0%** | 0% |
+| Backlit | +2 EV | 69.1% | **0%** | 0% |
+| Backlit | contrast 2.0 | 58.2% | **0%** | 30.3% |
+| Night scene | contrast 1.3 | 1.4% | **0%** | 39.2% |
+| Night scene | contrast 2.0 | 7.7% | **0%** | 50.1% |
+
+**Blown goes to zero everywhere, and that is partly trivial.** The shoulder is
+asymptotic to 1 and never reaches it, so no pixel can land on code 255 by
+construction. The figure that means something is how many distinct code values
+the recovered highlights actually occupy, which is the sweep below.
+
+**Crushed is unchanged, and that is correct.** Those pixels are already negative
+before the display transform sees them: a contrast slope above 1 takes values
+below the pivot through zero via the ACEScct toe. That is the tone map's problem
+to solve only in the sense that it is not the tone map's problem at all — it is
+the grade operating on scene-referred data with no floor, and the fix belongs in
+the film stage's toe rather than in the display path.
+
+### Choosing the knee
+
+Measured on the backlit frame. The trade is how far an **unedited** image moves
+against how much highlight detail is recovered, over the 568k pixels the clamp
+blew at +1 EV:
+
+| Knee | Unedited mean shift | Worst shift | Distinct highlight levels |
+|---|---|---|---|
+| 0.4 | 13.29 code values | 37 | 19 |
+| 0.5 | 9.20 | 31 | 16 |
+| 0.6 | 5.70 | 24 | 15 |
+| 0.7 | 2.88 | 18 | 13 |
+| 0.8 | 1.06 | 12 | 10 |
+
+Dropping from 0.8 to 0.4 costs twelve code values of fidelity on every unedited
+photograph to buy nine levels of highlight detail. That is a poor bargain here,
+and the reason is worth stating: **an 8-bit source has no data above diffuse
+white to recover.** A JPEG's highlights are already clipped in the file. The
+roll-off is almost entirely working on values the *pipeline* created by pushing
+exposure and contrast, not rescuing anything the camera captured.
+
+**0.75 is the default**: the unedited shift is below the threshold of visibility
+and most of the separation survives.
+
+### What the photographs show
+
+- **The sun disc is back**, as a soft luminous gradient rather than the flat
+  white blob the clamp produced at contrast 1.4. Structure, not just a lower
+  number.
+- **Contrast 1.6 reads as a strong grade rather than damage.** The sky keeps its
+  gradient from cyan through to the horizon.
+- **It does not read as haze.** The roll-off is exactly the identity below the
+  knee, so shadows and midtones are untouched — the failure where a tone map
+  lifts the whole image to avoid clipping cannot occur with this operator shape.
+- **No hue shift in saturated regions.** Gamut compression scales the whole
+  chroma vector by one factor, so hue is preserved to floating point rather than
+  approximately; saturated patches desaturate slightly without turning plastic.
+- **Shadows are still crushed**, unchanged and for the reason above.
 
 ## Golden images and the SwiftShader backend
 

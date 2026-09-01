@@ -1,0 +1,298 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  DEFAULT_DISPLAY_SETTINGS,
+  GAMUT_COMPRESS_THRESHOLD,
+  TONE_MAP_KNEE,
+  displayTransform,
+  displayTransformIdentity,
+  gamutCompressRgb,
+  toneMapChannel,
+  toneMapRgb,
+} from '../../src/core/colour/display'
+import { ACESCG_TO_SRGB, SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
+import { MIDDLE_GREY_LINEAR } from '../../src/core/colour/grade'
+import { srgbEotf, srgbOetf } from '../../src/core/colour/transfer'
+import { mat3MulVec3 } from '../../src/core/colour/types'
+import type { Vec3 } from '../../src/core/colour/types'
+
+describe('tone map', () => {
+  it('is exactly the identity at and below the knee', () => {
+    // Not "close to" the identity. The middle grey property below depends on
+    // this being exact, and an operator that is merely nearly the identity in the
+    // midtones is one that quietly rescales every photograph.
+    for (const x of [0, 1e-6, 0.05, 0.18, TONE_MAP_KNEE / 2, TONE_MAP_KNEE]) {
+      expect(toneMapChannel(x, TONE_MAP_KNEE)).toBe(x)
+    }
+  })
+
+  it('leaves middle grey exactly where it is', () => {
+    // The property the whole operator was chosen for. If the tone map moved
+    // 0.18, exposure would stop behaving like exposure: a stop would still
+    // double the scene value, but the displayed result would no longer follow,
+    // and Stage 4's measurement that a stop is a stop would silently stop being
+    // true.
+    expect(TONE_MAP_KNEE).toBeGreaterThan(MIDDLE_GREY_LINEAR)
+    expect(toneMapChannel(MIDDLE_GREY_LINEAR, TONE_MAP_KNEE)).toBe(MIDDLE_GREY_LINEAR)
+  })
+
+  it('meets its own linear section smoothly, not merely continuously', () => {
+    // A break in slope at the knee shows up on a gradient as a visible edge
+    // where the roll-off starts. Continuity alone would not catch it.
+    const knee = TONE_MAP_KNEE
+    const h = 1e-6
+    const below = (toneMapChannel(knee, knee) - toneMapChannel(knee - h, knee)) / h
+    const above = (toneMapChannel(knee + h, knee) - toneMapChannel(knee, knee)) / h
+    expect(below).toBeCloseTo(1, 6)
+    expect(above).toBeCloseTo(1, 4)
+  })
+
+  it('is monotonically increasing across the whole input range', () => {
+    // Including far above 1.0, which is where a badly formed shoulder inverts.
+    // A tone map that reordered two values would render a brighter part of the
+    // scene darker than a dimmer one.
+    let previous = -Infinity
+    for (let i = 0; i <= 4000; i++) {
+      const x = -1 + (i / 4000) * 200
+      const y = toneMapChannel(x, TONE_MAP_KNEE)
+      expect(y).toBeGreaterThan(previous)
+      previous = y
+    }
+  })
+
+  it('never reaches or exceeds display white', () => {
+    for (const x of [1, 4, 100, 65504]) {
+      expect(toneMapChannel(x, TONE_MAP_KNEE)).toBeLessThan(1)
+      expect(toneMapChannel(x, TONE_MAP_KNEE)).toBeGreaterThan(TONE_MAP_KNEE)
+    }
+  })
+
+  it('separates values that clipping would have made identical', () => {
+    // The entire point. Two highlights three stops apart both become 1.0 under a
+    // clamp; under the roll-off they stay ordered and distinguishable.
+    const a = toneMapChannel(2, TONE_MAP_KNEE)
+    const b = toneMapChannel(16, TONE_MAP_KNEE)
+    expect(b).toBeGreaterThan(a)
+    // Distinguishable after the 8-bit encode, not merely different as floats.
+    const codeA = Math.round(srgbOetf(a) * 255)
+    const codeB = Math.round(srgbOetf(b) * 255)
+    expect(codeB - codeA).toBeGreaterThanOrEqual(2)
+  })
+
+  it('returns negative input unchanged rather than inventing a value', () => {
+    expect(toneMapChannel(-0.2, TONE_MAP_KNEE)).toBe(-0.2)
+    expect(Number.isNaN(toneMapChannel(-0.2, TONE_MAP_KNEE))).toBe(false)
+  })
+
+  it('applies per channel, so a bright saturated colour bleaches toward white', () => {
+    // Per-channel is the decision, and this is what it looks like: the largest
+    // channel is compressed most, so the ratio between channels narrows and the
+    // colour desaturates as it brightens, as an emulsion does.
+    const before: Vec3 = [8, 2, 0.5]
+    const after = toneMapRgb(before, TONE_MAP_KNEE)
+    const saturationBefore = (before[0] - before[2]) / before[0]
+    const saturationAfter = (after[0] - after[2]) / after[0]
+    expect(saturationAfter).toBeLessThan(saturationBefore)
+  })
+})
+
+describe('gamut compression', () => {
+  it('leaves colours within the threshold distance exactly unchanged', () => {
+    // Exactly, not approximately: below the threshold the compression is the
+    // identity, so an ordinary photograph is untouched by it.
+    for (const rgb of [
+      [0.5, 0.5, 0.5],
+      [0.2, 0.18, 0.22],
+      [0.8, 0.5, 0.3],
+      [1, 0.5, 0.5],
+      [0, 0, 0],
+    ] as Vec3[]) {
+      expect(gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)).toEqual(rgb)
+    }
+  })
+
+  it('leaves neutrals untouched at any distance', () => {
+    for (const v of [0.01, 0.18, 1, 40]) {
+      expect(gamutCompressRgb([v, v, v], GAMUT_COMPRESS_THRESHOLD)).toEqual([v, v, v])
+    }
+  })
+
+  it('brings every negative channel back into gamut', () => {
+    for (const rgb of [
+      [1, -0.3, -0.1],
+      [0.4, -0.9, 0.2],
+      [2, 0.1, -4],
+      [0.05, -0.001, 0.02],
+    ] as Vec3[]) {
+      const out = gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)
+      for (let c = 0; c < 3; c++) {
+        expect(out[c], `channel ${c} of ${rgb.join(', ')}`).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('preserves the ordering of channels that clipping collapses', () => {
+    // The mechanism behind the hue claim. Clipping sends every negative channel
+    // to the same zero, so two different colours become one; compression keeps
+    // them apart, and the ordering is what carries the hue.
+    const a = gamutCompressRgb([1, -0.05, -0.4], GAMUT_COMPRESS_THRESHOLD)
+    const b = gamutCompressRgb([1, -0.4, -0.05], GAMUT_COMPRESS_THRESHOLD)
+    expect(a[1]).toBeGreaterThan(a[2])
+    expect(b[2]).toBeGreaterThan(b[1])
+    expect(a).not.toEqual(b)
+  })
+
+  it('preserves hue exactly, which clipping does not', () => {
+    // Hue as the angle of the chroma vector in the plane perpendicular to the
+    // achromatic axis. Defined for any real triple, negatives included, which a
+    // saturation-based hue is not.
+    //
+    // This began as "better than clipping" and failed: compressing each channel's
+    // own distance independently shifted hue further than clipping did, because
+    // moving channels by different proportions turns the chroma vector. Scaling
+    // the whole vector by one factor makes preservation exact, so the assertion
+    // is exactness rather than an improvement.
+    const hueAngle = (rgb: Vec3): number => {
+      const alpha = rgb[0] - (rgb[1] + rgb[2]) / 2
+      const beta = (Math.sqrt(3) / 2) * (rgb[1] - rgb[2])
+      return Math.atan2(beta, alpha)
+    }
+    const angleDelta = (a: number, b: number): number => {
+      const d = Math.abs(a - b) % (2 * Math.PI)
+      return d > Math.PI ? 2 * Math.PI - d : d
+    }
+
+    const cases: Vec3[] = [
+      [1, -0.3, -0.1],
+      [0.9, -0.15, 0.4],
+      [0.2, 1.1, -0.35],
+      [-0.25, 0.6, 1],
+      [2, -1, 0.5],
+    ]
+
+    let clippedTotal = 0
+    for (const original of cases) {
+      const clipped: Vec3 = [
+        Math.max(0, original[0]),
+        Math.max(0, original[1]),
+        Math.max(0, original[2]),
+      ]
+      const compressed = gamutCompressRgb(original, GAMUT_COMPRESS_THRESHOLD)
+
+      expect(
+        angleDelta(hueAngle(compressed), hueAngle(original)),
+        `compression moved the hue of ${original.join(', ')}`,
+      ).toBeLessThan(1e-9)
+
+      clippedTotal += angleDelta(hueAngle(clipped), hueAngle(original))
+    }
+
+    // And clipping genuinely does move it, so the assertion above is not vacuous.
+    expect(clippedTotal).toBeGreaterThan(0.2)
+  })
+
+  it('reduces saturation rather than darkening, leaving the brightest channel alone', () => {
+    // The achromatic value is the largest channel, so it is its own fixed point.
+    // A compression that moved it would dim the colour as a side effect of
+    // bringing it into gamut, which reads as a dark fringe on saturated edges.
+    for (const rgb of [[1, -0.3, -0.1], [0.2, 1.1, -0.35], [-0.25, 0.6, 1]] as Vec3[]) {
+      const peak = Math.max(rgb[0], rgb[1], rgb[2])
+      const out = gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)
+      expect(Math.max(out[0], out[1], out[2])).toBeCloseTo(peak, 12)
+    }
+  })
+
+  it('meets its own identity section smoothly at the threshold', () => {
+    const t = GAMUT_COMPRESS_THRESHOLD
+    const at = (distance: number): number => {
+      // A colour whose green sits at the given distance from an achromatic of 1.
+      const rgb: Vec3 = [1, 1 - distance, 1]
+      return gamutCompressRgb(rgb, t)[1]
+    }
+    const h = 1e-6
+    const below = (at(t) - at(t - h)) / h
+    const above = (at(t + h) - at(t)) / h
+    // Distance increasing means the channel decreasing, so the slope is -1.
+    expect(below).toBeCloseTo(-1, 4)
+    expect(above).toBeCloseTo(-1, 3)
+  })
+})
+
+describe('the assembled display transform', () => {
+  it('leaves an ordinary in-gamut photograph untouched below the knee', () => {
+    // The property that decides whether opening a file changes it. Everything an
+    // 8-bit source contains below the knee must survive the display path
+    // unaltered, or the editor is grading images nobody asked it to.
+    for (const encoded of [0.05, 0.2, 0.4, 0.6]) {
+      const linear = srgbEotf(encoded)
+      const acescg = mat3MulVec3(SRGB_TO_ACESCG, [linear, linear, linear])
+      const out = displayTransform(acescg, DEFAULT_DISPLAY_SETTINGS)
+      for (let c = 0; c < 3; c++) {
+        expect(out[c], `encoded ${encoded} channel ${c}`).toBeCloseTo(encoded, 6)
+      }
+    }
+  })
+
+  it('keeps middle grey at middle grey through the whole chain', () => {
+    const acescg = mat3MulVec3(SRGB_TO_ACESCG, [
+      MIDDLE_GREY_LINEAR,
+      MIDDLE_GREY_LINEAR,
+      MIDDLE_GREY_LINEAR,
+    ])
+    const out = displayTransform(acescg, DEFAULT_DISPLAY_SETTINGS)
+    for (let c = 0; c < 3; c++) {
+      expect(out[c]).toBeCloseTo(srgbOetf(MIDDLE_GREY_LINEAR), 6)
+    }
+  })
+
+  it('produces output inside the encodable range without relying on the clamp', () => {
+    // With both stages on, the clamp is a safety net rather than something the
+    // image depends on: compression removes the negatives and the shoulder is
+    // bounded below 1.
+    for (const acescg of [
+      [40, 0.2, 0.001],
+      [0, 12, 0],
+      [3, 3, 3],
+      [0.9, 0.02, 2.5],
+    ] as Vec3[]) {
+      const linear = mat3MulVec3(ACESCG_TO_SRGB, acescg)
+      const compressed = gamutCompressRgb(linear, GAMUT_COMPRESS_THRESHOLD)
+      const mapped = toneMapRgb(compressed, TONE_MAP_KNEE)
+      for (let c = 0; c < 3; c++) {
+        expect(mapped[c], `channel ${c}`).toBeGreaterThanOrEqual(0)
+        expect(mapped[c], `channel ${c}`).toBeLessThan(1)
+      }
+    }
+  })
+
+  it('keeps the identity path free of both stages, for round-trip verification', () => {
+    // sRGB in must equal sRGB out through an otherwise identity pipeline. This
+    // is impossible against tone-mapped output and is what the two-leg harness
+    // addresses the matrix through.
+    for (const encoded of [0.02, 0.35, 0.78, 1]) {
+      const linear = srgbEotf(encoded)
+      const acescg = mat3MulVec3(SRGB_TO_ACESCG, [linear, linear, linear])
+      const out = displayTransformIdentity(acescg)
+      for (let c = 0; c < 3; c++) {
+        expect(out[c]).toBeCloseTo(encoded, 6)
+      }
+    }
+  })
+
+  it('recovers highlights the clamp alone would have flattened', () => {
+    // The measurement this stage exists for, at a single pixel. Two highlights
+    // that a clamp makes identical must come out different.
+    const bright = mat3MulVec3(SRGB_TO_ACESCG, [1.5, 1.5, 1.5])
+    const brighter = mat3MulVec3(SRGB_TO_ACESCG, [6, 6, 6])
+
+    const clampOnly = { ...DEFAULT_DISPLAY_SETTINGS, toneMap: false, gamutCompress: false }
+    expect(displayTransform(bright, clampOnly)[0]).toBeCloseTo(1, 12)
+    expect(displayTransform(brighter, clampOnly)[0]).toBeCloseTo(1, 12)
+
+    const a = displayTransform(bright, DEFAULT_DISPLAY_SETTINGS)[0]
+    const b = displayTransform(brighter, DEFAULT_DISPLAY_SETTINGS)[0]
+    expect(a).toBeLessThan(1)
+    expect(b).toBeLessThan(1)
+    expect(b).toBeGreaterThan(a)
+  })
+})

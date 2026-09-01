@@ -12,7 +12,7 @@
 
 import { ACESCG_TO_SRGB } from '../core/colour/matrices'
 import { MIDDLE_GREY_LINEAR } from '../core/colour/grade'
-import { srgbOetf } from '../core/colour/transfer'
+import { SRGB_ENCODED_BREAK, srgbOetf } from '../core/colour/transfer'
 import { mat3MulVec3 } from '../core/colour/types'
 import type { Vec3 } from '../core/colour/types'
 
@@ -58,6 +58,18 @@ export interface Patch {
  * happened. Deriving it removes the opportunity.
  */
 const MID_GREY_ENCODED = srgbOetf(MIDDLE_GREY_LINEAR)
+
+/**
+ * Either side of the sRGB piecewise break, derived from the break itself.
+ *
+ * These were 0.04 and 0.045 against a break at 0.04045 — correct, but only
+ * because someone had done the arithmetic once and it happened to stay true.
+ * Written against the constant, a patch labelled "just below the break" is below
+ * the break by construction, and it stays there if the break is ever corrected.
+ */
+const BREAK_MARGIN = 0.0005
+const BELOW_BREAK = SRGB_ENCODED_BREAK - BREAK_MARGIN
+const ABOVE_BREAK = SRGB_ENCODED_BREAK + BREAK_MARGIN
 
 /**
  * Patches whose **ACEScg** value is the specification, not their sRGB input.
@@ -124,8 +136,18 @@ export const PATCHES: readonly Patch[] = [
 
   { encoded: [0.35, 0.7, 0.55], label: 'muted green', midtone: true, outOfGamut: false },
   { encoded: [0.7, 0.35, 0.2], label: 'muted orange', midtone: true, outOfGamut: false },
-  { encoded: [0.04, 0.04, 0.04], label: 'just below the sRGB break', midtone: false, outOfGamut: false },
-  { encoded: [0.045, 0.045, 0.045], label: 'just above the sRGB break', midtone: false, outOfGamut: false },
+  {
+    encoded: [BELOW_BREAK, BELOW_BREAK, BELOW_BREAK],
+    label: 'just below the sRGB break',
+    midtone: false,
+    outOfGamut: false,
+  },
+  {
+    encoded: [ABOVE_BREAK, ABOVE_BREAK, ABOVE_BREAK],
+    label: 'just above the sRGB break',
+    midtone: false,
+    outOfGamut: false,
+  },
   { encoded: [0.2, 0.6, 0.4], label: 'mid green', midtone: true, outOfGamut: false },
 
   { encoded: [1.2, 1.2, 1.2], label: 'encoded above 1.0', midtone: false, outOfGamut: true },

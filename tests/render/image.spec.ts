@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test'
 
+import { DEFAULT_DISPLAY_SETTINGS, displayTransform } from '../../src/core/colour/display'
+import { SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
+import { srgbEotf } from '../../src/core/colour/transfer'
+import { mat3MulVec3 } from '../../src/core/colour/types'
+import type { Vec3 } from '../../src/core/colour/types'
 import { PROXY_LONG_EDGE, proxySize } from '../../src/render/decodeProtocol'
 
 /**
@@ -129,15 +134,34 @@ test.describe('image loading', () => {
     // buffer-to-source scaling isotropic; the graph asserts that per pass.
     expect(state.canvasWidth / state.canvasHeight).toBeCloseTo(4000 / 3000, 2)
 
-    // Colour survives decode, upload, ingest and display. The tolerance is for
-    // JPEG at quality 0.95 on flat blocks plus the 8-bit round trip.
+    // Colour survives decode, upload, ingest and display.
+    //
+    // The expectation goes through the display reference rather than comparing
+    // against the source colour, because with a tone map in the path an image no
+    // longer round-trips to itself: anything above the knee is rolled off on the
+    // way to the display, by design. Comparing to the input would be asserting
+    // that the display transform does nothing.
     for (let band = 0; band < BLOCKS.length; band++) {
-      const expected = BLOCKS[band]
+      const source = BLOCKS[band]
       const actual = state.samples[band]
-      expect(expected, `band ${band} fixture`).toBeDefined()
+      expect(source, `band ${band} fixture`).toBeDefined()
       expect(actual, `band ${band} sample`).toBeDefined()
-      if (!expected || !actual) continue
+      if (!source || !actual) continue
+
+      const linear: Vec3 = [
+        srgbEotf((source[0] ?? 0) / 255),
+        srgbEotf((source[1] ?? 0) / 255),
+        srgbEotf((source[2] ?? 0) / 255),
+      ]
+      const displayed = displayTransform(
+        mat3MulVec3(SRGB_TO_ACESCG, linear),
+        DEFAULT_DISPLAY_SETTINGS,
+      )
+      const expected = displayed.map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255))
+
       for (let c = 0; c < 3; c++) {
+        // The tolerance is for JPEG at quality 0.95 on flat blocks plus the
+        // 8-bit round trip.
         expect(
           Math.abs((actual[c] ?? -1) - (expected[c] ?? -1)),
           `band ${band} channel ${'rgb'[c] ?? '?'}: expected ~${expected[c]}, got ${actual[c]}`,

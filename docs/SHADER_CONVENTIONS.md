@@ -376,6 +376,41 @@ backends disagreeing in the last place. A factor of two over the derived bound
 has been sufficient throughout; state it as headroom rather than folding it in
 silently, so a later reader can tell the prediction from the padding.
 
+### A fixture constant with a semantic label must be derived, never transcribed
+
+Write `srgbOetf(0.18)`, not `0.46136`.
+
+This is a separate failure from everything above, and neither the tolerance
+method nor the two legs can catch it. An agreement test verifies that two
+implementations of a transform match. It says nothing about whether a value fed
+to both of them is what its label claims — and if the input is wrong, both
+implementations agree perfectly on the wrong answer.
+
+That happened here. A patch labelled "middle grey 0.18 linear" held
+`0.18 ** (1/2.2)` = 0.45866, the pure gamma-2.2 encoding, rather than the sRGB
+piecewise encoding 0.46136. It decoded to 0.1777. Every agreement test passed for
+two stages, because the shader and the reference were handed the same wrong
+number. It surfaced only when a test finally asserted a **property** of the value
+— that middle grey does not move as contrast changes — rather than comparing two
+implementations to each other.
+
+The two encodings differ by 0.6%. Small enough to look right in a table of
+numbers, large enough to matter. `src/core/colour/transfer.ts` warns about
+exactly this confusion, at length, and it happened anyway. **That is the argument
+for deriving rather than for warning harder.**
+
+The surface grows from here. Fixtures accumulate labelled constants — middle
+grey, an 18% card, white points, log encoding anchors, and later stock-specific
+density references — and every one passes every agreement test while being
+silently wrong.
+
+**GLSL is the one place transcription is unavoidable**, because a `const`
+initialiser must be a constant expression, so `log2(65504.0)` and
+`encodeACEScct(0.18)` have to be written out. `tests/unit/glsl-constants.test.ts`
+parses the shader source and compares every constant against the TypeScript it
+came from, including the row-to-column transpose on the matrices. Guarded
+directly, since it cannot be designed away.
+
 ### Worked instance
 
 `tests/render/agreement.spec.ts` carries this as `rowTolerance` and

@@ -8,6 +8,7 @@ import { exposurePass } from '../../src/render/passes/exposure'
 import { ingestPass } from '../../src/render/passes/ingest'
 import { testPatternPass } from '../../src/render/passes/testPattern'
 import type { RenderInput } from '../../src/render/passes/types'
+import { DEFAULT_VIEW_STATE } from '../../src/render/passes/types'
 
 /**
  * A counting stand-in for the parts of WebGL2 the cache touches.
@@ -75,7 +76,7 @@ function input(
   return {
     source: { kind: 'pattern' },
     edit: { exposure: overrides.exposure ?? 0, contrast: overrides.contrast ?? 1 },
-    view: { displayMode: overrides.displayMode ?? 'sdr' },
+    view: { ...DEFAULT_VIEW_STATE, displayMode: overrides.displayMode ?? 'sdr' },
   }
 }
 

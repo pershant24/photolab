@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test'
 
+import { DEFAULT_DISPLAY_SETTINGS, displayTransform } from '../../src/core/colour/display'
+import type { DisplaySettings } from '../../src/core/colour/display'
 import { ACESCG_TO_SRGB, SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
-import { srgbEotf, srgbOetf } from '../../src/core/colour/transfer'
+import { srgbEotf } from '../../src/core/colour/transfer'
 import { mat3MulVec3 } from '../../src/core/colour/types'
 import type { Vec3 } from '../../src/core/colour/types'
 import {
@@ -113,15 +115,27 @@ const linearise = (patch: Vec3): Vec3 => [srgbEotf(patch[0]), srgbEotf(patch[1])
 /** What ingest must produce. */
 const tsIngest = (patch: Vec3): Vec3 => mat3MulVec3(SRGB_TO_ACESCG, linearise(patch))
 
-/** What display must produce from a given ACEScg value: matrix, clamp, encode. */
+/**
+ * What display must produce from a given ACEScg value.
+ *
+ * The reference is `displayTransform`, the same function the shader is a
+ * transliteration of, driven by the same settings — so adding a stage to the
+ * display path cannot silently fall outside what leg 2 checks.
+ *
+ * The legs run with both operator stages **off**, leaving matrix, clamp and
+ * encode. That is deliberate: leg 2 exists to pin `ACESCG_TO_SRGB`, and a tone
+ * map compresses precisely the values where a matrix error is most visible.
+ * `tests/render/display.spec.ts` covers the operators themselves.
+ */
+const LEG_SETTINGS: DisplaySettings = {
+  toneMap: false,
+  gamutCompress: false,
+  toneMapKnee: DEFAULT_DISPLAY_SETTINGS.toneMapKnee,
+  gamutThreshold: DEFAULT_DISPLAY_SETTINGS.gamutThreshold,
+}
+
 function tsDisplay(acescg: Vec3): Vec3 {
-  const back = mat3MulVec3(ACESCG_TO_SRGB, acescg)
-  const clamped: Vec3 = [
-    Math.min(1, Math.max(0, back[0])),
-    Math.min(1, Math.max(0, back[1])),
-    Math.min(1, Math.max(0, back[2])),
-  ]
-  return [srgbOetf(clamped[0]), srgbOetf(clamped[1]), srgbOetf(clamped[2])]
+  return displayTransform(acescg, LEG_SETTINGS)
 }
 
 /** Whether the display transform clamps this channel, from the measured ACEScg. */
@@ -155,7 +169,8 @@ interface RendererLike {
     ): void
   }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
-  input: unknown
+  input: { source: unknown; edit: unknown; view: Record<string, unknown> }
+  setView(next: Record<string, unknown>): void
   source: { kind: string }
   passContext(): unknown
   syncSize(available?: { width: number; height: number }): boolean
@@ -198,7 +213,15 @@ async function measureBothLegs(page: import('@playwright/test').Page): Promise<L
       const finalTarget = renderer.graph.pool.acquire(canvas.width, canvas.height)
       try {
         renderer.graph.render(
-          renderer.input,
+          {
+            ...renderer.input,
+            view: {
+              ...renderer.input.view,
+              displayMode: 'sdr',
+              toneMap: false,
+              gamutCompress: false,
+            },
+          },
           renderer.passContext(),
           {
             finalTarget,
@@ -318,6 +341,10 @@ test.describe('shader and reference agreement', () => {
       const renderer = (window as unknown as { __photolabRenderer: RendererLike })
         .__photolabRenderer
       renderer.stop()
+      // Clamp only. These two tests are about the matrix, the clamp and the
+      // encode; the operators are covered by display.spec.ts, and a tone map
+      // would compress exactly the values a matrix error shows up in.
+      renderer.setView({ ...renderer.input.view, toneMap: false, gamutCompress: false })
       renderer.renderNow()
       const gl = renderer.context.gl
       const element = renderer.context.canvas
@@ -389,6 +416,10 @@ test.describe('shader and reference agreement', () => {
       const renderer = (window as unknown as { __photolabRenderer: RendererLike })
         .__photolabRenderer
       renderer.stop()
+      // Clamp only. These two tests are about the matrix, the clamp and the
+      // encode; the operators are covered by display.spec.ts, and a tone map
+      // would compress exactly the values a matrix error shows up in.
+      renderer.setView({ ...renderer.input.view, toneMap: false, gamutCompress: false })
       renderer.renderNow()
       const gl = renderer.context.gl
       const element = renderer.context.canvas
