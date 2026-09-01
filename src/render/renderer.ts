@@ -23,6 +23,7 @@ import { exposurePass } from './passes/exposure'
 import { contrastPass } from './passes/contrast'
 import { createCurvePass } from './passes/curve'
 import { createFilmCurvesPass } from './passes/filmCurves'
+import { HALATION_PASSES } from './passes/halation'
 import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
 import type { FilmCurvesPass } from './passes/filmCurves'
@@ -51,19 +52,66 @@ const NOMINAL_SOURCE_LONG_EDGE = 4096
  * upscales it bilinearly, and at 2x the result reads as slightly soft rather
  * than as blocky.
  *
- * **Whether this is needed at all is a measurement, and the measurement says it
- * currently is not.** A full-resolution 12MP frame costs 0.97 ms on an Apple M5
- * against a 16.7 ms budget, so halving the resolution saves 0.7 ms of a frame
- * with 15.7 ms spare, and costs a visibly softer image throughout every drag.
+ * # Engaged only when frames are actually being missed
  *
- * It is kept because that figure is from one fast GPU and the chain it measures
- * is three passes; the film and lens stages arriving next are the expensive kind,
- * with spatial kernels rather than one tap per pixel. `tests/README.md` records
- * the full table and the condition for deleting this: if a full-resolution drag
- * is still inside budget on the slowest device worth supporting once the real
- * chain exists, this should go.
+ * The decision was deferred twice, to the first multi-tap kernel, and halation
+ * is it. Measured on a 12MP source with halation at a realistic radius:
+ *
+ *   buffer        Apple M5 (Metal)   SwiftShader
+ *   512x384             0.275 ms        18.4 ms
+ *   1024x768            0.400 ms        67.1 ms
+ *   2048x1536           1.585 ms       263.3 ms
+ *   4000x3000           6.092 ms      1023.0 ms
+ *
+ * Against a 16.7 ms budget, and against the 63% of high-frequency detail the
+ * proxy costs on every drag (measured at Stage 4), the two ends disagree
+ * completely:
+ *
+ * - **On this hardware the proxy is pure loss.** At a typical canvas it saves
+ *   0.13 ms of a frame with 16.3 ms spare, and even the *full* 12MP image at
+ *   6.1 ms is comfortably inside budget. Halving the resolution buys nothing and
+ *   softens every drag.
+ * - **On hardware an order of magnitude slower it is the difference between a
+ *   usable drag and an unusable one.** The software rasteriser — the closest
+ *   model of a weak GPU now that the chain is compute-bound rather than
+ *   bandwidth-bound — is 16 times over budget at the 2048px proxy, with the lens
+ *   stage's bloom and diffusion still to come.
+ *
+ * So it is neither deleted nor kept unconditionally: it **engages when frames
+ * are being missed and not before**. The signal is the interval between rendered
+ * frames during a gesture, which is exactly the symptom, and it needs no
+ * synchronisation — `gl.finish()` does not synchronise under ANGLE and would
+ * have to be a readback, which stalls the pipeline it is trying to measure.
+ *
+ * This is timing-derived, not content-derived, and the distinction is the one
+ * recorded in `display.ts`: the *resolution* varies, and the two-resolution
+ * invariant says resolution does not change the image. Output stays a pure
+ * function of the inputs; only how densely it is sampled moves.
  */
 export const DRAG_PROXY_SCALE = 0.5
+
+/**
+ * Frame interval above which a gesture is judged to be missing frames.
+ *
+ * 20ms rather than 16.7: a display refreshing at 60Hz delivers frames at 16.7ms
+ * and normal jitter crosses that constantly, so a threshold exactly at budget
+ * would engage the proxy on almost every drag. 20ms is one missed frame at 60Hz
+ * with room for the jitter.
+ */
+export const DRAG_PROXY_FRAME_BUDGET_MS = 20
+
+/** Consecutive slow frames before engaging. One is noise; three is a pattern. */
+export const DRAG_PROXY_SLOW_FRAMES = 3
+
+/**
+ * Whether the drag proxy may engage.
+ *
+ * `auto` is the shipping behaviour. The other two exist so a test can exercise
+ * the mechanism without depending on how fast the machine running it happens to
+ * be — a timing-dependent test of a timing-dependent feature would be flaky in
+ * both directions.
+ */
+export type DragProxyMode = 'auto' | 'always' | 'never'
 
 
 
@@ -77,6 +125,10 @@ export class Renderer {
   #filmCurvesPass: FilmCurvesPass
   #interacting = false
   #renderCount = 0
+  #dragProxyMode: DragProxyMode = 'auto'
+  #gestureOpen = false
+  #lastFrameAt = 0
+  #consecutiveSlowFrames = 0
   #frame: number | null = null
   #dirty = true
   #unsubscribe: () => void
@@ -93,6 +145,11 @@ export class Renderer {
       displayPass,
       this.#curvePass,
       contrastPass,
+      // Halation before the curves, within the film stage. Registration order
+      // decides inside a stage, and this one is physical: halation adds light to
+      // the emulsion, so it happens before the curves turn exposure into
+      // density. Listed here rather than left to chance.
+      ...HALATION_PASSES,
       this.#filmCurvesPass,
       testPatternPass,
       imageSourcePass,
@@ -234,9 +291,71 @@ export class Renderer {
    * targets, which is affordable twice and not affordable per frame.
    */
   setInteracting(active: boolean): void {
-    if (this.#interacting === active) return
-    this.#interacting = active
-    this.#dirty = true
+    this.#gestureOpen = active
+    if (!active) {
+      // Full resolution returns on release, always. The proxy is a concession to
+      // a gesture in progress, not a state to be left in.
+      this.#consecutiveSlowFrames = 0
+      this.#lastFrameAt = 0
+      if (this.#interacting) {
+        this.#interacting = false
+        this.#dirty = true
+      }
+      return
+    }
+
+    const engageImmediately = this.#dragProxyMode === 'always'
+    if (this.#interacting !== engageImmediately) {
+      this.#interacting = engageImmediately
+      this.#dirty = true
+    }
+  }
+
+  get dragProxyMode(): DragProxyMode {
+    return this.#dragProxyMode
+  }
+
+  setDragProxyMode(mode: DragProxyMode): void {
+    this.#dragProxyMode = mode
+    if (mode === 'never' && this.#interacting) {
+      this.#interacting = false
+      this.#dirty = true
+    }
+  }
+
+  /**
+   * Note how long the last frame took, and engage the proxy if a gesture is
+   * missing frames.
+   *
+   * Measured from wall-clock intervals between rendered frames rather than from
+   * the GPU, because the only reliable barrier available is a readback and that
+   * stalls the pipeline it would be measuring. The interval is the symptom
+   * anyway: a drag that holds frame rate does not need help.
+   *
+   * Once engaged it stays engaged for the rest of the gesture. Letting it
+   * disengage mid-drag would oscillate — dropping resolution makes frames fast
+   * again, which is the condition for going back to full resolution, which makes
+   * them slow again.
+   */
+  #noteFrameTiming(): void {
+    if (this.#dragProxyMode !== 'auto' || !this.#gestureOpen || this.#interacting) {
+      this.#lastFrameAt = performance.now()
+      return
+    }
+
+    const now = performance.now()
+    const elapsed = this.#lastFrameAt === 0 ? 0 : now - this.#lastFrameAt
+    this.#lastFrameAt = now
+
+    if (elapsed > DRAG_PROXY_FRAME_BUDGET_MS) {
+      this.#consecutiveSlowFrames += 1
+      if (this.#consecutiveSlowFrames >= DRAG_PROXY_SLOW_FRAMES) {
+        this.#interacting = true
+        this.#dirty = true
+      }
+    } else {
+      this.#consecutiveSlowFrames = 0
+    }
   }
 
   get interacting(): boolean {
@@ -350,6 +469,7 @@ export class Renderer {
   /** Render immediately, outside the frame loop. Used by tests and by resize. */
   renderNow(available?: { readonly width: number; readonly height: number }): void {
     if (this.#disposed) return
+    this.#noteFrameTiming()
     this.syncSize(available)
     this.#renderCount += 1
     this.#graph.render(this.input, this.passContext())

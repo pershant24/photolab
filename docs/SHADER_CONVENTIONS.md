@@ -411,6 +411,51 @@ parses the shader source and compares every constant against the TypeScript it
 came from, including the row-to-column transpose on the matrices. Guarded
 directly, since it cannot be designed away.
 
+### A parameter over an encoded domain must be checked against occupancy
+
+Assert that the domain a parameter is defined over matches the range real data
+actually occupies. And for any fixture sample labelled *shadow*, *midtone* or
+*highlight*, assert it falls in that region of a real image's histogram rather
+than merely being ordered correctly relative to the others.
+
+This is a different failure from a wrong constant, and the fixture rule above
+does not catch it. A value can be **correctly derived and still be in the wrong
+place.**
+
+The instance: the film characteristic curves were defined over ACEScct's full
+`[0.073, 1]` domain. That is arithmetically fine and every agreement test passed
+— across eight stops above display white that never contain a pixel. More than
+half of every stock was shaping tones no photograph has. The fixture sample
+called "highlight" was `1.4` linear, derived rather than transcribed, and
+encodes to 0.58 — a midtone, which in those stocks sat exactly on the crossover
+point. The measurement that resulted looked like the stocks being too subtle.
+
+Two things follow, and the second is the one to remember:
+
+- **Place control points in units the data is described in.** The stocks now sit
+  at stops from middle grey, so "three stops down" is in the shadows by
+  construction rather than by having been checked once.
+- **Anchor the domain to a defined reference.** Repositioning by occupancy alone
+  replaced one bug with a subtler one: the stocks had no nominal exposure, so the
+  strength of the look varied by a factor of six across a single stop. Middle grey
+  is now a fixed point of every stock.
+
+### An angle is meaningless without a magnitude assertion
+
+Any test on a hue angle must assert a **chroma floor first**.
+
+`atan2(b*, a*)` on the neutral axis is `atan2(0, 0)`. It does not error; it
+returns a confident number determined by rounding. A crossover test measuring
+hue alone reported **68 degrees of crossover from three identical curves**, which
+was floating-point noise on two neutrals.
+
+This is the polar form of the cancellation channels in §5: a derived quantity
+losing meaning as its magnitude approaches zero, and reporting a plausible value
+instead of failing. The same shape recurs wherever a direction is extracted from
+a vector — hue from chroma, an isotherm normal from a locus derivative, a
+gradient direction from a flat region. **Assert the magnitude, then the
+direction.**
+
 ### Worked instance
 
 `tests/render/agreement.spec.ts` carries this as `rowTolerance` and

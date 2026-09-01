@@ -158,6 +158,22 @@ export class RenderGraph {
   }
 
   /**
+   * The largest tile overlap any enabled pass needs, in source pixels.
+   *
+   * Tiled export expands every tile by this much. The maximum rather than a sum,
+   * because passes run in sequence over the whole tile: each one needs its own
+   * kernel's worth of margin present, not the accumulation of all of them.
+   */
+  requiredOverlap(input: RenderInput): number {
+    let largest = 0
+    for (const pass of this.#passes) {
+      if (!pass.enabled(input) || !pass.overlap) continue
+      largest = Math.max(largest, pass.overlap(input))
+    }
+    return largest
+  }
+
+  /**
    * Render one frame into the canvas.
    *
    * `input` carries the source image, the edit parameters and the viewing
@@ -190,6 +206,10 @@ export class RenderGraph {
     this.#quad.bind()
 
     let readFrom: RenderTarget | null = null
+    // Buffers held back from the pool because a later pass needs them. Released
+    // together at the end of the frame.
+    const retained = new Map<string, RenderTarget>()
+    const retainedTargets = new Set<RenderTarget>()
 
     for (let i = 0; i < active.length; i++) {
       const pass = active[i]
@@ -197,6 +217,16 @@ export class RenderGraph {
       const isLast = i === active.length - 1
 
       assertIsotropic(context, pass.id)
+
+      if (pass.retainInputAs) {
+        if (!readFrom) {
+          throw new RenderGraphError(
+            `pass "${pass.id}" wants to retain its input, but it is first in the chain and has none`,
+          )
+        }
+        retained.set(pass.retainInputAs, readFrom)
+        retainedTargets.add(readFrom)
+      }
 
       const output = isLast ? (options.finalTarget ?? null) : this.#pool.acquire(width, height)
 
@@ -211,6 +241,24 @@ export class RenderGraph {
       gl.useProgram(compiled.program)
 
       this.#bindContractUniforms(compiled.uniformLocation.bind(compiled), context, readFrom, pass)
+
+      if (pass.auxiliaryInput) {
+        const { key, sampler, unit } = pass.auxiliaryInput
+        const source = retained.get(key)
+        if (!source) {
+          throw new RenderGraphError(
+            `pass "${pass.id}" wants the retained buffer "${key}", which no earlier pass published`,
+          )
+        }
+        const location = compiled.uniformLocation(sampler)
+        if (location) {
+          gl.activeTexture(gl.TEXTURE0 + unit)
+          gl.bindTexture(gl.TEXTURE_2D, source.texture)
+          gl.uniform1i(location, unit)
+          gl.activeTexture(gl.TEXTURE0)
+        }
+      }
+
       pass.bindUniforms(gl, compiled.uniformLocation.bind(compiled), input, context)
 
       this.#quad.draw()
@@ -220,13 +268,15 @@ export class RenderGraph {
       // hands the buffer back out.
       options.onPassComplete?.(pass.id, output)
 
-      // Released only after the draw that reads it has been issued.
-      if (readFrom) this.#pool.release(readFrom)
+      // Released only after the draw that reads it has been issued — unless a
+      // later pass has asked to read it too, in which case the pool waits.
+      if (readFrom && !retainedTargets.has(readFrom)) this.#pool.release(readFrom)
       // A caller-supplied final target is not the pool's to hand back.
       readFrom = output === options.finalTarget ? null : output
     }
 
-    if (readFrom) this.#pool.release(readFrom)
+    if (readFrom && !retainedTargets.has(readFrom)) this.#pool.release(readFrom)
+    for (const target of retainedTargets) this.#pool.release(target)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.bindVertexArray(null)

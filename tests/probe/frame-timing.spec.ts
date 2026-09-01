@@ -130,9 +130,23 @@ test('frame time across proxy resolutions on a 12MP source', async ({ page }) =>
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
       }
 
+      // With halation on at a realistic radius. Until this pass existed the
+      // chain was three per-pixel passes, which measures how fast the hardware
+      // moves memory rather than what this pipeline costs; a multi-tap kernel is
+      // the first thing here that is compute-bound.
       const frame = (exposure: number): void => {
         renderer.graph.render(
-          { ...renderer.input, edit: { ...renderer.input.edit, exposure, contrast: 1 } },
+          {
+            ...renderer.input,
+            edit: {
+              ...renderer.input.edit,
+              exposure,
+              contrast: 1,
+              halationStrength: 0.7,
+              halationThreshold: 1.2,
+              halationRadius: 0.008,
+            },
+          },
           context,
           { finalTarget: target },
         )
@@ -189,7 +203,7 @@ test('frame time across proxy resolutions on a 12MP source', async ({ page }) =>
     .join('\n')
 
   console.log(
-    `\nFrame time, 12MP source, ingest + display chain\n` +
+    `\nFrame time, 12MP source, full pass chain (ingest, exposure, halation, film curves, display)\n` +
       `Renderer: ${report.renderer}\n${rows}\n` +
       `  (16.7 ms/frame is the 60Hz budget)\n`,
   )

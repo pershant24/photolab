@@ -178,6 +178,43 @@ export interface Pass {
   ): void
 
   /**
+   * Retain this pass's **input** under a key, for a later pass to sample.
+   *
+   * The graph is otherwise a straight chain: each pass reads the one before it.
+   * A composite effect needs more than that — halation blurs a thresholded copy
+   * of the image and then adds it back to the *unblurred* original, which is no
+   * longer the previous pass's output by the time the compositing happens.
+   *
+   * Retaining rather than copying: the buffer already exists, so the only change
+   * is that the pool does not get it back until the frame ends.
+   */
+  readonly retainInputAs?: string
+
+  /**
+   * Bind a previously retained buffer to an extra sampler.
+   *
+   * The pass still receives `uSource` as normal; this is in addition to it.
+   */
+  readonly auxiliaryInput?: {
+    readonly key: string
+    readonly sampler: string
+    readonly unit: number
+  }
+
+  /**
+   * Tile overlap this pass needs, in **source-image pixels**, at this state.
+   *
+   * Step 7 of the add-a-pass recipe. A pass with a spatial kernel reads outside
+   * the tile it is writing, so tiled export must expand each tile by this much
+   * or the kernel runs off the edge and the seams show.
+   *
+   * A **function of the state**, not a constant, because the extent of a kernel
+   * is the radius the user set. A constant would be either wrong at large radii
+   * or wasteful at small ones.
+   */
+  overlap?(input: RenderInput): number
+
+  /**
    * Release anything the pass owns on the GPU.
    *
    * Most passes own nothing and omit this. A pass that caches a texture between

@@ -23,6 +23,17 @@ void main() {
     //
     // EXIF orientation is already applied by the decoder, so this is the only
     // geometric correction in the pipeline.
-    vec2 uv = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
+    vec2 flipped = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
+
+    // The buffer covers uSourceRect of the image, not necessarily all of it. For
+    // the interactive path the rect is the whole image and this is the identity;
+    // for an export tile it is the tile's own region, and without this every
+    // tile would render the entire photograph scaled down.
+    //
+    // This is also what makes the radius formula in halation.glsl distinguishable
+    // from the wrong one. On a full-frame render the correct expression and the
+    // one that reads uResolution reduce to the same thing, exactly as the two
+    // uniforms did in Stage 3; only a tile separates them.
+    vec2 uv = (uSourceRect.xy + flipped * uSourceRect.zw) / uImageSize;
     fragColour = vec4(texture(uImage, uv).rgb, 1.0);
 }

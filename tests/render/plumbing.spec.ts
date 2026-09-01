@@ -71,15 +71,23 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'ingest',
     'whiteBalance',
     'exposure',
+    'halationThreshold',
+    'halationBlurH',
+    'halationBlurV',
+    'halationComposite',
     'filmCurves',
     'toneCurve',
     'contrast',
     'display',
   ])
 
-  // Three of the nine passes run at the default edit: imageSource is disabled
-  // with no image, and white balance, exposure, the film curves, the tone curve
-  // and contrast are all at their identity values. A disabled pass costs neither a program nor a
+  // Three of the thirteen passes run at the default edit: imageSource is
+  // disabled with no image, halation is off, and white balance, exposure, the
+  // film curves, the tone curve and contrast are all at their identity values.
+  //
+  // The four halation passes appear here in physical order — threshold, blur
+  // across, blur down, composite — and before the characteristic curves, since
+  // halation adds light to the emulsion and the curves turn light into density. A disabled pass costs neither a program nor a
   // draw — which is also what makes "neutral white balance is an exact identity"
   // true rather than nearly true.
   expect(counts.afterFirstFrame, 'one program per enabled pass').toBe(3)

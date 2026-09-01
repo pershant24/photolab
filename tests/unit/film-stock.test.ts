@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { evaluateCurve, fitControlPoints } from '../../src/core/colour/curve'
 import {
+  DISPLAY_WHITE_ACESCCT,
   FILM_DOMAIN,
   FILM_STOCKS,
+  MIDDLE_GREY_ACESCCT,
+  stopsFromGrey,
   IDENTITY_CHANNEL,
   channelFromSamples,
   findFilmStock,
@@ -12,6 +15,7 @@ import {
 import { hueDifference, labChroma, labHueAngle, linearSrgbToLab } from '../../src/core/colour/lab'
 import { ACESCG_TO_SRGB } from '../../src/core/colour/matrices'
 import { decodeACEScct, encodeACEScct } from '../../src/core/colour/transfer'
+import { MIDDLE_GREY_LINEAR } from '../../src/core/colour/grade'
 import { mat3MulVec3 } from '../../src/core/colour/types'
 import type { Vec3 } from '../../src/core/colour/types'
 import { splitControlPoints } from '../../src/core/state/editState'
@@ -101,11 +105,21 @@ describe('crossover', () => {
     green: readonly number[]
     blue: readonly number[]
   }): { shadowHue: number; highlightHue: number; shadowChroma: number; highlightChroma: number; separation: number } {
-    const shadow = linearSrgbToLab(mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, 0.012)))
-    // 0.85 linear, just under display white. A value of 1.4 was used first and is
-    // not a highlight at all: it encodes to ACEScct 0.58, which is a midtone and
-    // in these stocks sits exactly on the crossover point.
-    const highlight = linearSrgbToLab(mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, 0.85)))
+    // Sampled in STOPS FROM MIDDLE GREY rather than at chosen linear values.
+    //
+    // That is the occupancy rule applied to a fixture: a sample labelled
+    // "shadow" has to be in the shadows *of a real image*, not merely smaller
+    // than the other one. Both earlier attempts got this wrong in different
+    // ways — 1.4 linear was called a highlight and encodes to a midtone, and
+    // 0.012 was called a shadow and sits four stops down where the channels have
+    // already converged. Stops from grey are the units the curves are defined
+    // in, so a sample at -3 stops is in the shadows by construction.
+    const shadow = linearSrgbToLab(
+      mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, decodeACEScct(stopsFromGrey(-3)))),
+    )
+    const highlight = linearSrgbToLab(
+      mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, decodeACEScct(stopsFromGrey(2)))),
+    )
     return {
       shadowHue: labHueAngle(shadow),
       highlightHue: labHueAngle(highlight),
@@ -156,23 +170,75 @@ describe('crossover', () => {
     expect(out[1]).toBeCloseTo(out[2], 9)
   })
 
+  it('leaves middle grey exactly neutral, in every stock and every channel', () => {
+    // The anchor, and the property everything else here depends on. A correctly
+    // exposed midtone comes out exactly where it went in, so exposure moves the
+    // image along the curves from a defined origin — and a correctly exposed
+    // skin tone does not shift hue, which is where crossover usually goes wrong.
+    //
+    // It also makes the stocks comparable: all three agree at grey, so a
+    // difference between them is a difference in character rather than in where
+    // they happen to sit.
+    for (const stock of FILM_STOCKS) {
+      const out = applyStock(stock, MIDDLE_GREY_LINEAR)
+      for (const channelValue of out) {
+        expect(channelValue, `${stock.id} moves middle grey`).toBeCloseTo(MIDDLE_GREY_LINEAR, 9)
+      }
+      expect(
+        labChroma(linearSrgbToLab(mat3MulVec3(ACESCG_TO_SRGB, out))),
+        `${stock.id} tints middle grey`,
+      ).toBeLessThan(1e-6)
+    }
+  })
+
+  it('places its control points where a real image lives', () => {
+    // The occupancy rule. A curve is only doing work over the range the data
+    // occupies, and a display-referred image spans roughly six stops below
+    // middle grey up to display white at +2.47. Control points spread past that
+    // shape tones no picture contains — which is not a hypothetical: the first
+    // version spread them over the full encoded domain, whose top half is nearly
+    // eight stops above white, and more than half of every stock did nothing.
+    for (const stock of FILM_STOCKS) {
+      const { xs } = splitControlPoints(stock.green)
+      const occupied = xs.filter(
+        (x) => x >= stopsFromGrey(-6) && x <= DISPLAY_WHITE_ACESCCT + 1e-9,
+      )
+      expect(
+        occupied.length / xs.length,
+        `${stock.id}: only ${occupied.length} of ${xs.length} control points are in the occupied range`,
+      ).toBeGreaterThan(0.6)
+
+      // And grey is one of them, so the anchor is a control point rather than an
+      // accident of interpolation.
+      expect(xs.some((x) => Math.abs(x - MIDDLE_GREY_ACESCCT) < 1e-9)).toBe(true)
+    }
+  })
+
   it('survives a change of exposure', () => {
     // A look that only holds at one exposure is a cast dressed as a stock.
     //
-    // The *magnitude* legitimately varies, and by a lot: measured on the first
-    // stock, the shadow-to-highlight separation is 26 degrees at nominal
-    // exposure and 172 a stop up, because a stop moves which part of the curves
-    // a given tone lands on and the channels swap order partway along. That is
-    // how push and pull processing behaves and is not a defect. What must not
-    // happen is crossover disappearing.
+    // Anchoring the curves to middle grey is what makes this hold. Before it,
+    // the separation was 26 degrees at nominal exposure and 172 a stop up — a
+    // factor of six from one stop, because the stocks had no defined reference
+    // and a "correctly exposed" image landed wherever the last one had. Measured
+    // after: 175, 174, 174, 175 across four stops.
+    //
+    // It still collapses two stops down, where both samples fall below the
+    // lowest control point and the channels have converged. That is the curves
+    // running out rather than the look failing, and it is why the range tested
+    // here is the one the stocks are defined over.
     const stock = FILM_STOCKS[0]
     expect(stock).toBeDefined()
     if (!stock) return
 
     for (const stops of [-1, 0, 1]) {
       const gain = 2 ** stops
-      const shadow = linearSrgbToLab(mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, 0.03 * gain)))
-      const highlight = linearSrgbToLab(mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, 0.9 * gain)))
+      const shadow = linearSrgbToLab(
+        mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, decodeACEScct(stopsFromGrey(-3)) * gain)),
+      )
+      const highlight = linearSrgbToLab(
+        mat3MulVec3(ACESCG_TO_SRGB, applyStock(stock, decodeACEScct(stopsFromGrey(2)) * gain)),
+      )
 
       expect(labChroma(shadow), `no shadow colour at ${stops} stops`).toBeGreaterThan(1)
       expect(

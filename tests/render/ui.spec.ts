@@ -120,6 +120,10 @@ test.describe('parameter controls', () => {
     expect(box).not.toBeNull()
     if (!box) return
 
+    await page.evaluate(() =>
+      (window as unknown as { __photolabRenderer: { setDragProxyMode(m: string): void } })
+        .__photolabRenderer.setDragProxyMode('always'),
+    )
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2)
     await page.mouse.down()
 

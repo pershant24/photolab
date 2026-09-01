@@ -44,6 +44,19 @@ value.** That is not hypothetical: `tests/unit/primaries.test.ts` records a real
 6.6e-5 disagreement between two published sRGB matrices, caused by one deriving
 D65 from its chromaticity and the other using the ASTM tabulated white.
 
+**A parameter over an encoded domain must be checked against occupancy**, and a
+fixture sample labelled shadow, midtone or highlight must be asserted to fall in
+that region of a real image rather than merely being ordered correctly. A value
+can be correctly derived and still be in the wrong place: the film curves were
+defined over eight stops above display white that never contain a pixel, and the
+sample called "highlight" was a midtone. Every agreement test passed throughout.
+
+**An angle is meaningless without a magnitude assertion.** A hue test must assert
+a chroma floor first, or `atan2(0, 0)` returns a confident number determined by
+rounding — which reported 68 degrees of crossover from three identical curves.
+The polar form of the cancellation-channel problem. `docs/SHADER_CONVENTIONS.md`
+§5 carries both in full.
+
 **A fixture constant with a semantic label must be derived, never transcribed** —
 `srgbOetf(0.18)`, not `0.46136`. This is the one failure an agreement test
 structurally cannot catch: it checks that two implementations match, not that a
@@ -358,3 +371,183 @@ regressions pass" failure mode.
 The Chromium version is part of the expected output. The CI cache key is pinned
 to the resolved `@playwright/test` version so an upgrade invalidates it, and any
 Playwright bump should be treated as requiring golden regeneration.
+
+## The occupancy rule
+
+**A parameter defined over an encoded domain, and a fixture labelled with a
+tonal region, are both claims about where data is. Assert them.**
+
+Neither kind of claim is checked by anything else in the suite, and both have
+been wrong here three times, each time in source that read as entirely
+reasonable:
+
+| Claim | What it said | What was true |
+|---|---|---|
+| Film curve control points | evenly spread over ACEScct `[0.073, 1]` | the top half decodes above eight stops over display white, so half the curve shaped pixels that cannot exist |
+| A fixture named `highlight` | linear `1.4` | encodes to `0.58`, the middle of the range — and the exact crossover point, so the measurement it fed read near zero for a real effect |
+| `halationThreshold`'s range | `[-1, 4]`, commented as fully occupied | nothing in a display-referred image exceeds `+2.474`, so the top third of the slider did nothing at all |
+
+All three were found by looking at a photograph and wondering why, which is not
+a repeatable process. `tests/unit/occupancy.test.ts` asserts them instead, and
+both mutations were watched to fail:
+
+- default back to `+1.5` — 4 tests fail
+- range back to `[-1, 4]` — 2 tests fail
+
+### The fixture is a histogram, not a photograph
+
+`tests/fixtures/luminance-histograms.ts` holds 240-bin luminance histograms of
+two real photographs. Checking in the photographs is the obvious way and the
+wrong one: this repository is intended to go public for Pages, a JPEG is
+permanent once pushed, and these are personal photographs of identifiable
+people. A histogram is not invertible.
+
+Two properties of the fixture that took a correction to get right:
+
+- **Bin the quantity the shader actually thresholds.** ACEScg luminance under
+  AP1 weights, after the sRGB decode and the primaries matrix — the same value
+  `halationThreshold.frag` computes. A first pass binned Rec.709 weights on
+  sRGB-linear, which is close enough to eyeball and makes every assertion a
+  statement about a domain no parameter controls.
+- **Bin at native resolution.** The first pass binned 1000px thumbnails, and
+  downsampling averages away isolated specular peaks — exactly the population a
+  highlight threshold is about. It reported near-zero occupancy for a threshold
+  whose rendered effect was plainly visible.
+
+### Weigh over the shoulder, not at the point
+
+The threshold shader is `smoothstep(t, t*sqrt(2), luminance)`, so the population
+that contributes is the window `[t, t·√2]`, weighted. Counting pixels above `t`
+is the wrong measurement: on the night frame, `0.003%` of pixels sit above the
+default threshold while the rendered effect reaches **38 levels out of 255** on
+the brightest folds of a shirt. A bar set on the count calls a visible effect
+absent.
+
+### Chroma floor before any angle
+
+A hue angle is meaningless without a magnitude. `atan2(0, 0)` returns a
+confident, rounding-determined number, and an early crossover measurement
+reported 68° of separation from three identical curves on that basis. Every hue
+assertion in the suite is now preceded by a chroma floor; `display.test.ts` had
+two without one, found by sweeping for the pattern rather than by noticing.
+
+## Halation
+
+### Where the threshold has to sit, measured
+
+Occupancy of the two fixture photographs, as fraction of frame inside the
+scattering window (smoothstep-weighted) and strictly above threshold:
+
+| Threshold (EV over grey) | night: mass / above | talk: mass / above |
+|---|---|---|
+| +1.5 | 0.38% / 2.27% | **14.6% / 31.7%** |
+| +1.8 | 0.008% / 0.23% | 2.69% / 12.6% |
+| **+2.0** | 0.001% / 0.003% | 0.58% / 3.07% |
+| +2.2 | 0.0002% / 0.002% | 0.10% / 0.61% |
+
+The shipped default was `+1.5`. At that setting **a third of a lit interior is
+above threshold**, and it looks like it: the white brick wall behind the speaker
+glows pink. A third of a picture is not a highlight. The default is now `+2.0`
+and the range `[0, 3]` — `+2.474` is display white and the hard ceiling for any
+unmodified image, with one stop of headroom because exposure genuinely raises
+it.
+
+**The two photographs disagree by a factor of ~500 at the default, and that is
+correct rather than residual error.** Halation is a threshold phenomenon in
+absolute exposure; film does not rebalance per frame. A night scene lit by one
+flash should show almost none and a room full of lights should show some.
+Normalising per image would even it out and would be content-derived
+adaptivity — the thing ruled out for the drag proxy, for the same reason.
+
+### What the photographs show, at the corrected default
+
+Rendered differences from halation off, at strength 0.7 and radius 0.006:
+
+| | night | talk |
+|---|---|---|
+| +1.5 | 1.6% of pixels, worst 71/255 | 34% of pixels, worst 153/255 |
+| +2.0 | 0.03% of pixels, worst 38/255 | 3.3% of pixels, worst 57/255 |
+
+- **It reads as light bleeding within the image, not as a glow on top** — but
+  only above about `+1.8`. Below that it is unmistakably the second thing: at
+  `+0` every light-toned surface in the night frame washes pink, shirts, shorts,
+  boat and sand alike, which is exactly what a bloom filter over the top looks
+  like.
+- **It discriminates emissive from merely light-toned, at the corrected
+  default.** The talk frame is the useful case because both are present: the LED
+  panel's white book spines bleed warm into the blue around them while the white
+  painted brick beside the screen stays neutral. At `+1.5` the wall glowed.
+- **Flash-lit white cotton is the hard case and it passes.** In the night frame
+  the brightest object is a shirt, not a light. At `+2.0` the diffuse cotton is
+  untouched and only the few genuinely blown folds pick up warmth.
+- **The characteristic curves do not flatten it — they concentrate it.** Through
+  a stock the affected area shrinks and the peak rises: no curves 3.25% of
+  pixels / worst 57; warm-portrait 2.89% / 66; punchy-reversal 1.24% / 70. The
+  shoulder compresses the broad faint fringe toward white while the steeper
+  midsection amplifies the core. Punchy-reversal has the harder shoulder and
+  shows the effect most sharply. This is the argument for halation running
+  *before* the curves: a curve applied to scattered light is the film responding
+  to it, which is what physically happens.
+- **It stops looking like film between 0.015 and 0.03 of the long edge.** Up to
+  0.015 the glow hugs the contour of the bright object and reads as its light.
+  By 0.03 it has detached into a soft blob sitting over the picture. At 0.06 it
+  is a broad haze and the source no longer looks like its origin — and the
+  bright object is *less* bright than at a small radius, because the scattered
+  energy that lands back on the source at 0.004 is spread away from it at 0.06.
+  `HALATION_FILMLIKE_MAX_RADIUS = 0.015` records the boundary; the slider goes
+  to 0.04 because it is a judgement rather than a limit.
+
+### Why the golden specs pin the threshold
+
+`two-resolution.spec.ts` and `tile-overlap.spec.ts` both set
+`halationThreshold` explicitly rather than inheriting the default. This is
+deliberate and must stay: their tolerances are derived assuming there is a
+blurred halo to compare, and a default raised above the synthetic source's peak
+would drive the measured disagreement to zero and make **both tests pass
+trivially**. A test that passes because the effect is off is worse than no test.
+
+## The drag proxy: engaged only when frames are missed
+
+The decision was deferred twice, to the first multi-tap kernel. Halation is it.
+Frame time on a 12MP source with halation at a realistic radius:
+
+| buffer | Apple M5 (Metal) | SwiftShader (LLVM) |
+|---|---|---|
+| 512×384 | 0.275 ms | 18.4 ms |
+| 1024×768 | 0.400 ms | 67.1 ms |
+| 2048×1536 | 1.585 ms | 263.3 ms |
+| 4000×3000 | 6.092 ms | 1023.0 ms |
+
+Against the Stage 4 bandwidth-bound floor (12MP was 0.97 ms on Metal) the chain
+is now **6.3× more expensive**, so this is real work rather than memory
+traffic. Against a 16.7 ms budget the two ends disagree completely:
+
+- **On this hardware the proxy is pure loss.** At a typical canvas it saves
+  0.13 ms of a frame with 16.3 ms spare, and even the full 12MP image at 6.09 ms
+  is inside budget. It buys nothing and costs the 63% of high-frequency detail
+  measured at Stage 4, on every drag.
+- **An order of magnitude slower it is the difference between usable and not.**
+  SwiftShader — the closest available model of a weak GPU now that the chain is
+  compute-bound — is 16× over budget at the 2048px proxy, with the lens stage's
+  bloom and diffusion still to come.
+
+So it is neither deleted nor kept unconditionally. It engages after
+`DRAG_PROXY_SLOW_FRAMES` consecutive intervals over `DRAG_PROXY_FRAME_BUDGET_MS`
+(20 ms, not 16.7 — a 60 Hz display jitters across exactly 16.7 constantly) and
+stays engaged for the rest of the gesture. Letting it disengage mid-drag would
+oscillate: dropping resolution makes frames fast, which is the condition for
+going back to full resolution, which makes them slow.
+
+Measured from wall-clock intervals between rendered frames, not from the GPU:
+the only reliable barrier available is a readback, which stalls the pipeline it
+would be measuring. `gl.finish()` does not synchronise under ANGLE.
+
+**This is timing-derived, not content-derived.** The distinction is the one in
+`renderer.ts`: the resolution varies, and the two-resolution invariant says
+resolution does not change the image. Output stays a pure function of the
+inputs; only how densely it is sampled moves.
+
+`DragProxyMode` (`auto` / `always` / `never`) exists so tests can exercise the
+mechanism without depending on how fast the machine running them happens to be.
+A timing-dependent test of a timing-dependent feature would be flaky in both
+directions.

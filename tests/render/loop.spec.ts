@@ -12,6 +12,7 @@ interface RendererLike {
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
   renderCount: number
   interacting: boolean
+  setDragProxyMode(mode: string): void
   syncSize(available?: { width: number; height: number }): boolean
   renderNow(available?: { width: number; height: number }): void
   start(): void
@@ -136,6 +137,10 @@ test.describe('drag proxy', () => {
         .__photolabRenderer
       const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
       renderer.stop()
+      // Forced on, because the shipping behaviour engages only when frames are
+      // being missed and this machine does not miss any. A timing-dependent test
+      // of a timing-dependent feature would be flaky in both directions.
+      renderer.setDragProxyMode('always')
       renderer.renderNow()
 
       const canvas = renderer.context.canvas
@@ -198,6 +203,7 @@ test.describe('drag proxy', () => {
         // plumbing.spec.ts. What must compile nothing is the proxy switch, and
         // mixing the two would let a real regression hide behind an expected
         // increment.
+        renderer.setDragProxyMode('always')
         store.getState().setParameter('exposure', 1)
         renderer.renderNow()
         store.getState().setParameter('exposure', 0)
@@ -263,6 +269,7 @@ test.describe('drag proxy', () => {
       const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
       renderer.stop()
 
+      renderer.setDragProxyMode('always')
       // Both passes off their identity values, so both are in the chain.
       store.getState().setParameter('exposure', 1.35)
       store.getState().setParameter('contrast', 1.4)

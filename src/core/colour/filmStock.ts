@@ -39,7 +39,8 @@
  */
 
 import { fitControlPoints } from './curve'
-import { encodeACEScct } from './transfer'
+import { ACESCCT_LOG_SCALE, encodeACEScct } from './transfer'
+import { MIDDLE_GREY_LINEAR } from './grade'
 
 /** The bottom of the curve domain: ACEScct of zero light. */
 export const FILM_DOMAIN_LOW = encodeACEScct(0)
@@ -94,25 +95,67 @@ function channel(xs: readonly number[], ys: readonly number[]): number[] {
  * legible as character.
  */
 /**
- * Display white, in ACEScct. **This is where the useful range ends.**
+ * Middle grey in ACEScct, and the width of one stop in that encoding.
  *
- * The domain runs to 1.0, which decodes to a linear value of about 223 — nearly
- * eight stops above display white. A display-referred image occupies only
- * `[FILM_DOMAIN_LOW, 0.5548]`, so **more than half the domain is above anything
- * the picture contains**, and control points placed evenly across it spend most
- * of themselves on tones that do not exist.
+ * ACEScct's log segment has a fixed scale, so a stop is a constant distance
+ * along it — `1 / 17.52` — which is what makes "two stops above grey" a
+ * position rather than an estimate.
+ */
+export const MIDDLE_GREY_ACESCCT = encodeACEScct(MIDDLE_GREY_LINEAR)
+export const STOP_IN_ACESCCT = 1 / ACESCCT_LOG_SCALE
+
+/** A position on the curve, in stops relative to middle grey. */
+export function stopsFromGrey(stops: number): number {
+  return MIDDLE_GREY_ACESCCT + stops * STOP_IN_ACESCCT
+}
+
+/**
+ * Display white, in ACEScct: 2.47 stops above middle grey, since 1 / 0.18 is
+ * 5.56.
  *
- * That was the first version's mistake, and it did not look like one: the curves
- * were valid, the arithmetic agreed with the shader, and the crossover
- * measurement came out weak for a reason that read as the stocks being too
- * subtle. What was actually happening is that the sample called "highlight" — a
- * linear value of 1.4 — encodes to 0.58, which sat on the crossover point rather
- * than past it. The control points are now distributed over the range the image
- * occupies, with one point beyond it to keep the curve defined.
+ * **This is where the useful range ends.** The domain runs to 1.0, which decodes
+ * to a linear value of about 223 — nearly eight stops past display white — so
+ * more than half of it is above anything a display-referred picture contains.
  */
 export const DISPLAY_WHITE_ACESCCT = encodeACEScct(1)
 
-const SHARED_X = [LO, 0.17, 0.29, 0.41, 0.5, DISPLAY_WHITE_ACESCCT, 1]
+/**
+ * # Control points are placed in stops from middle grey, not by occupancy
+ *
+ * An earlier version distributed them across the range one test image happened
+ * to occupy. That fixed a worse bug — points spread evenly over a domain whose
+ * top half contains no pixels — but replaced it with a subtler one: the stocks
+ * had no defined reference, so a "correctly exposed" image landed wherever the
+ * previous image had, and the strength of the look varied by a factor of six
+ * across a single stop of exposure.
+ *
+ * Real film has a nominal exposure it is designed around. These now do too:
+ *
+ * - **Middle grey is a fixed point of every stock, in every channel.** A
+ *   correctly exposed midtone comes out exactly where it went in, so exposure
+ *   moves the image along the curves from a defined origin rather than from an
+ *   arbitrary one — and a correctly exposed skin tone does not shift hue, which
+ *   is where crossover usually goes wrong.
+ * - **Stocks become comparable.** All three agree at grey, so a difference
+ *   between them is a difference in character rather than in where they happen
+ *   to sit.
+ *
+ * The spacing runs from four stops under grey to display white, with the domain
+ * endpoints kept so the curve stays defined outside that.
+ */
+const SHARED_X = [
+  LO,
+  stopsFromGrey(-4),
+  stopsFromGrey(-2.5),
+  stopsFromGrey(-1.25),
+  MIDDLE_GREY_ACESCCT,
+  stopsFromGrey(1.25),
+  DISPLAY_WHITE_ACESCCT,
+  1,
+]
+
+/** The index of the middle-grey anchor within {@link SHARED_X}. */
+export const GREY_ANCHOR_INDEX = 4
 
 export const FILM_STOCKS: readonly FilmStock[] = [
   {
@@ -124,9 +167,9 @@ export const FILM_STOCKS: readonly FilmStock[] = [
     // Blue sits above red in the shadows and below it at display white, so the
     // drift reverses across the range the picture actually occupies. That
     // reversal is the crossover.
-    red: channel(SHARED_X, [LO, 0.155, 0.278, 0.408, 0.508, 0.566, 1.0]),
-    green: channel(SHARED_X, [LO, 0.17, 0.29, 0.41, 0.5, 0.5548, 0.98]),
-    blue: channel(SHARED_X, [LO, 0.185, 0.302, 0.412, 0.492, 0.545, 0.96]),
+    red: channel(SHARED_X, [LO, 0.178, 0.264, 0.339, MIDDLE_GREY_ACESCCT, 0.492, 0.57, 1.0]),
+    green: channel(SHARED_X, [LO, 0.18527, 0.27089, 0.34224, MIDDLE_GREY_ACESCCT, 0.48494, 0.5548, 0.98]),
+    blue: channel(SHARED_X, [LO, 0.193, 0.278, 0.3455, MIDDLE_GREY_ACESCCT, 0.478, 0.54, 0.96]),
   },
   {
     id: 'punchy-reversal',
@@ -134,9 +177,9 @@ export const FILM_STOCKS: readonly FilmStock[] = [
     description:
       'High contrast with a hard shoulder, cyan-leaning shadows and a warm, ' +
       'quickly saturating top end. Reversal film rather than negative.',
-    red: channel(SHARED_X, [LO, 0.13, 0.255, 0.415, 0.535, 0.6, 1.0]),
-    green: channel(SHARED_X, [LO, 0.15, 0.27, 0.412, 0.52, 0.583, 0.99]),
-    blue: channel(SHARED_X, [LO, 0.175, 0.288, 0.41, 0.505, 0.565, 0.96]),
+    red: channel(SHARED_X, [LO, 0.168, 0.252, 0.332, MIDDLE_GREY_ACESCCT, 0.505, 0.6, 1.0]),
+    green: channel(SHARED_X, [LO, 0.178, 0.261, 0.337, MIDDLE_GREY_ACESCCT, 0.497, 0.582, 0.99]),
+    blue: channel(SHARED_X, [LO, 0.195, 0.276, 0.343, MIDDLE_GREY_ACESCCT, 0.488, 0.562, 0.96]),
   },
   {
     id: 'muted-documentary',
@@ -148,9 +191,9 @@ export const FILM_STOCKS: readonly FilmStock[] = [
     // version had green leading at both ends, which drifts and still is not
     // crossover — it is a green cast that warms slightly, and telling those two
     // apart is exactly what the direction assertion exists for.
-    red: channel(SHARED_X, [LO, 0.18, 0.295, 0.4, 0.487, 0.54, 0.92]),
-    green: channel(SHARED_X, [LO, 0.215, 0.318, 0.405, 0.47, 0.515, 0.88]),
-    blue: channel(SHARED_X, [LO, 0.187, 0.298, 0.402, 0.483, 0.535, 0.91]),
+    red: channel(SHARED_X, [LO, 0.192, 0.274, 0.343, MIDDLE_GREY_ACESCCT, 0.478, 0.538, 0.92]),
+    green: channel(SHARED_X, [LO, 0.206, 0.283, 0.348, MIDDLE_GREY_ACESCCT, 0.47, 0.522, 0.88]),
+    blue: channel(SHARED_X, [LO, 0.194, 0.275, 0.3435, MIDDLE_GREY_ACESCCT, 0.477, 0.536, 0.91]),
   },
 ]
 

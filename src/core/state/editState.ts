@@ -90,6 +90,18 @@ export interface EditState {
 
   /** How far toward the film curves to go. 0 is off, 1 is the stock as designed. */
   readonly filmStrength: number
+
+  /** How much scattered light to add back. 0 is off. */
+  readonly halationStrength: number
+
+  /**
+   * Where scattering begins, in **stops from middle grey**. Display white is
+   * +2.474, so a threshold above that catches only what exposure created.
+   */
+  readonly halationThreshold: number
+
+  /** Scatter radius, as a fraction of the source image's long edge. */
+  readonly halationRadius: number
 }
 
 /** The keys of `EditState` whose values are numbers. */
@@ -189,6 +201,52 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    key: 'halationStrength',
+    label: 'Halation',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+  },
+  {
+    key: 'halationThreshold',
+    label: 'Halation threshold',
+    // In stops from middle grey, and the range is bounded by where data is
+    // rather than by what reads as a round number.
+    //
+    // A display-referred image has no linear value above 1.0, so nothing in a
+    // photograph sits above +2.474 until exposure lifts it. The range that
+    // shipped ran to +4 with a comment claiming the whole of it was occupied;
+    // measured against a real histogram, its top third did nothing at all.
+    //
+    // +3 keeps a stop of headroom, which exposure genuinely reaches, and stops
+    // there. The floor is 0 rather than negative: below grey the effect stops
+    // being a highlight threshold and washes the whole frame, which is a
+    // legitimate extreme but not a place to go looking.
+    //
+    // The default moved from +1.5 to +2.0 after looking at photographs. At +1.5,
+    // 31% of a lit interior is above threshold and a white brick wall glows pink
+    // — see `tests/unit/occupancy.test.ts`, which holds the bound.
+    min: 0,
+    max: 3,
+    step: 0.05,
+    defaultValue: 2,
+    unit: 'EV',
+  },
+  {
+    key: 'halationRadius',
+    label: 'Halation radius',
+    // A fraction of the source long edge, so it is the same size on a proxy and
+    // on an export. Past about 0.015 it stops looking like film; the slider goes
+    // further because that is a judgement rather than a limit.
+    min: 0.001,
+    max: 0.04,
+    step: 0.0005,
+    defaultValue: 0.006,
+    unit: '',
+  },
+  {
     key: 'toneMapKnee',
     label: 'Highlight roll-off',
     // A single default cannot serve both an unedited photograph and a heavily
@@ -243,6 +301,9 @@ export const DEFAULT_EDIT_STATE: EditState = {
   filmCurveGreen: [...IDENTITY_CHANNEL],
   filmCurveBlue: [...IDENTITY_CHANNEL],
   filmStrength: 1,
+  halationStrength: 0,
+  halationThreshold: 2,
+  halationRadius: 0.006,
 }
 
 /**

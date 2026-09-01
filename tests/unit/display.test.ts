@@ -12,7 +12,7 @@ import {
 } from '../../src/core/colour/display'
 import { ACESCG_TO_SRGB, SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
 import { MIDDLE_GREY_LINEAR } from '../../src/core/colour/grade'
-import { hueDifference, labHueAngle, linearSrgbToLab } from '../../src/core/colour/lab'
+import { hueDifference, labChroma, labHueAngle, linearSrgbToLab } from '../../src/core/colour/lab'
 import { whiteBalanceMatrix } from '../../src/core/colour/whiteBalance'
 import { srgbEotf, srgbOetf } from '../../src/core/colour/transfer'
 import { mat3MulVec3 } from '../../src/core/colour/types'
@@ -200,6 +200,15 @@ describe('gamut compression', () => {
     const worse: string[] = []
 
     for (const original of cases) {
+      // Chroma floor before any angle. A hue angle is `atan2(b*, a*)` and is
+      // meaningless as chroma goes to zero — it returns a confident number
+      // rather than an error, which is how three identical film curves once
+      // reported 68 degrees of crossover. Every colour here must have real
+      // chroma for the angles below to mean anything.
+      expect(
+        labChroma(linearSrgbToLab(original)),
+        `${original.join(', ')} has no chroma, so its hue is undefined`,
+      ).toBeGreaterThan(5)
       const clipped: Vec3 = [
         Math.max(0, original[0]),
         Math.max(0, original[1]),
@@ -299,6 +308,9 @@ describe('gamut compression', () => {
           Math.max(0, linear[2]),
         ]
         const compressed = gamutCompressRgb(linear, GAMUT_COMPRESS_THRESHOLD)
+        // Chroma floor, as above: white balance could in principle produce a
+        // near-neutral out-of-gamut colour, whose hue angle would be noise.
+        if (labChroma(linearSrgbToLab(linear)) < 2) continue
         const target = hueOf(linear)
         const shift = hueDifference(hueOf(compressed), target)
 
