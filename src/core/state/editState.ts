@@ -102,6 +102,17 @@ export interface EditState {
 
   /** Scatter radius, as a fraction of the source image's long edge. */
   readonly halationRadius: number
+
+  readonly grainStrength: number
+
+  /**
+   * Grain period, as a fraction of the source image's long edge.
+   *
+   * A physical size, so it is expressed against the source rather than against
+   * whatever buffer is being drawn. Below about two buffer pixels the preview
+   * cannot represent it and fades it out instead — see `src/core/colour/grain.ts`.
+   */
+  readonly grainSize: number
 }
 
 /** The keys of `EditState` whose values are numbers. */
@@ -247,6 +258,33 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    key: 'grainStrength',
+    label: 'Grain',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+  },
+  {
+    key: 'grainSize',
+    label: 'Grain size',
+    // A fraction of the source long edge. 0.0009 is about 5.4 source pixels on a
+    // 6000px image, which is roughly 35mm grain viewed at a normal print size.
+    //
+    // The floor is not a taste decision: below two buffer pixels the preview
+    // cannot represent the period at all and fades the amplitude rather than
+    // drawing grain of the wrong size, so a slider reaching much further down
+    // would be a control that visibly stops working partway along. 0.0005 is
+    // three source pixels on a 6000px image, which a full-resolution export
+    // can still draw on a 6000px source.
+    min: 0.0005,
+    max: 0.004,
+    step: 0.0001,
+    defaultValue: 0.0009,
+    unit: '',
+  },
+  {
     key: 'toneMapKnee',
     label: 'Highlight roll-off',
     // A single default cannot serve both an unedited photograph and a heavily
@@ -304,6 +342,8 @@ export const DEFAULT_EDIT_STATE: EditState = {
   halationStrength: 0,
   halationThreshold: 2,
   halationRadius: 0.006,
+  grainStrength: 0,
+  grainSize: 0.0009,
 }
 
 /**

@@ -532,9 +532,8 @@ traffic. Against a 16.7 ms budget the two ends disagree completely:
   bloom and diffusion still to come.
 
 So it is neither deleted nor kept unconditionally. It engages after
-`DRAG_PROXY_SLOW_FRAMES` consecutive intervals over `DRAG_PROXY_FRAME_BUDGET_MS`
-(20 ms, not 16.7 — a 60 Hz display jitters across exactly 16.7 constantly) and
-stays engaged for the rest of the gesture. Letting it disengage mid-drag would
+a median of `DRAG_PROXY_WINDOW` frame intervals over
+`DRAG_PROXY_FRAME_BUDGET_MS`, and stays engaged for the rest of the gesture. Letting it disengage mid-drag would
 oscillate: dropping resolution makes frames fast, which is the condition for
 going back to full resolution, which makes them slow.
 
@@ -551,3 +550,144 @@ inputs; only how densely it is sampled moves.
 mechanism without depending on how fast the machine running them happens to be.
 A timing-dependent test of a timing-dependent feature would be flaky in both
 directions.
+
+## The degenerate-case rule
+
+**A test that only exercises the degenerate case cannot detect an error that
+vanishes there.** The fix is never more coverage of the degenerate case; it is
+finding where the two formulations differ and testing *there*.
+
+Three instances so far, and the pattern is much easier to recognise from the
+examples than from the statement:
+
+| Instance | The two formulations | Where they coincide | What breaks the degeneracy |
+|---|---|---|---|
+| **The Stage 3 transpose** | `M` and `Mᵀ` | a round trip, since `Mᵀ·(M⁻¹)ᵀ = I` | comparing against measured intermediates rather than chaining a round trip |
+| **The halation radius** | against `uSourceRect` and against `uResolution` | a full-frame render, where `sourceLongEdge × (resolution.x / sourceRect.z)` reduces exactly to `resolution.x` | tiles, whose buffers do not cover the whole source |
+| **The grain seed** | source coordinates and buffer coordinates | a full-frame render, where the two differ by a constant scale | tiles again — and specifically tiles with *different origins*, compared where they overlap |
+
+The third one carries an extra lesson. A tile-against-tile check was written
+first and passed while the code was wrong, because the two tiles being compared
+shared a y extent and therefore shared a y-flip error. **Two cases that differ
+along the wrong axis are still one case.** The tiles-against-whole comparison
+caught it immediately, at 0.113.
+
+Tiles are what break the degeneracy for anything spatial, so a spatial pass
+without a tile test has not been tested.
+
+## The soft-edge metric rule
+
+**A metric for a soft-edged effect must integrate the soft edge**, or it measures
+a different effect than the one rendered.
+
+Counting pixels above `halationThreshold` reported a real, visible, localised
+effect as absent: on the night frame, 0.003% of pixels sit above the default
+while the render reaches **38 levels out of 255** on the brightest folds of a
+shirt. The shader's shoulder spans `[t, t·√2]`, so the population that
+contributes is a window and not a point, and the smoothstep-weighted version
+reports it correctly.
+
+The same rule applies to grain, where the metric had to change twice. Grain has
+no hard edge at all, so a pointwise comparison against a TypeScript reference
+is impossible — the value at a pixel comes from a hash, and transcribing the hash
+into TypeScript would assert that two transcriptions match rather than that the
+effect is right. What the modulation claims is about **amplitude**, so the
+amplitude is what is measured: the spread across a band of constant exposure,
+in ACEScct because that is the space the perturbation is applied in. Measuring
+the spread of *linear* values would recover the exponential rather than the
+modulation and report grain growing towards the highlights.
+
+## Grain
+
+### Where the modulation peaks, and why it is anchored
+
+The peak is at **middle grey**, stated in stops, not at a midpoint of the
+encoding. The rejected construction — normalise the encoded value over the range
+the data occupies, peak at the midpoint — is the occupancy failure one level up:
+that midpoint is a fact about where ACEScct's log/linear splice falls, and it
+lands 1.75 stops under grey for reasons that have nothing to do with emulsion.
+
+Share of a frame carrying grain, weighted by the modulation:
+
+| Peak | night | talk | spread |
+|---|---|---|---|
+| **middle grey** | 50.5% | 47.9% | **2.6 points** |
+| −1.75 stops (occupied-range midpoint) | 25.9% | 17.0% | 8.9 points |
+| +1.51 stops (`[0, 1]` midpoint) | 39.9% | 74.8% | 34.9 points |
+
+The anchored version is the only one that behaves the same on a low-key frame
+and a high-key one, which is what a property of the emulsion should do.
+
+### Independence is not measurable as a channel correlation
+
+The obvious statistic, `corr(R, G)` of the rendered values, does not work. The
+readback is in display primaries and the ACEScg→sRGB matrix has negative
+off-diagonals, so a perturbation of ACEScg red alone pushes sRGB green the other
+way. **Independent noise measures −0.27 to −0.56** across twenty regions of a
+photograph, which is the same neighbourhood a shared-noise mutation lands in.
+
+What works: one shared noise value moves the working-space triple along
+`(1, 1, 1)`, which the matrix maps to a single fixed direction, so every residual
+lies on a line and its covariance is rank one. The share of residual variance in
+the leading eigenvector is 0.45 for independent noise and **1.000** for a shared
+value. The bar sits in a gap rather than on a slope.
+
+### What the photographs show
+
+Grain residual — the difference the pass makes, pixel by pixel, which removes the
+picture — across twenty regions of a 6000px photograph, sorted by level:
+
+| mean (encoded) | grain | after tone map |
+|---|---|---|
+| 0.153 | 2.5e-3 | 2.5e-3 |
+| 0.192 | **5.2e-2** | 1.4e-2 |
+| 0.240 | 3.7e-2 | 1.4e-2 |
+| 0.458 | 1.3e-2 | 1.3e-2 |
+| 0.707 | 1.1e-2 | 1.1e-2 |
+| 0.884 | 5.2e-3 | 5.2e-3 |
+
+- **It sits in the image rather than on it**, and the density modulation is why:
+  roughly twenty times more grain in the low midtones than in the darkest or
+  brightest regions. A uniform overlay would give one number down the column.
+- **Present in the midtones, gone in deep shadow and blown highlight**, as above.
+- **The tone map's shoulder does eat some of it**, but only where it is
+  compressing: the strongest midtone regions drop by about two thirds, from
+  5.2e-2 to 1.4e-2, while regions the shoulder is not acting on are unchanged to
+  three figures. That is the tone map doing its job rather than grain being
+  fragile — the same compression applies to the picture around it.
+- **It is colour grain.** Visible directly at full resolution as red and blue
+  speckle rather than grey, and confirmed by the rank statistic above.
+
+### The preview cannot show it, and that is the honest behaviour
+
+At the default size on a 6000px source the proxy is **indistinguishable from
+grain switched off**, while the full-resolution render is obviously grainy. Above
+the representable limit — 0.004 of the long edge, 24 source pixels — the two
+agree closely and the invariant test asserts it.
+
+This is the deviation recorded in `docs/ARCHITECTURE.md` §4, and it is a real
+gap for a user: **grain cannot be judged in the preview at the default size.**
+The fix is a 1:1 inspector, which does not exist yet.
+
+### Frame time
+
+12MP source, full chain. Grain is per-pixel with no kernel, and costs what that
+suggests:
+
+| buffer | Metal, no grain | Metal, with grain | SwiftShader, with grain |
+|---|---|---|---|
+| 512×384 | 0.209 ms | 0.282 ms | 19.3 ms |
+| 2048×1536 | 1.542 ms | 1.936 ms | 295.0 ms |
+| 4000×3000 | 6.012 ms | 7.442 ms | 1046.6 ms |
+
+**+1.43 ms at 12MP**, taking a full-resolution frame to 45% of the 60 Hz budget.
+The drag proxy's trigger is unaffected: at the 2048px proxy Metal is 1.9 ms
+against a 33 ms threshold and SwiftShader is 295 ms, so grain moves neither end
+anywhere near the decision.
+
+**Verify the renderer string before trusting any of these.** Headless Chromium
+falls back to SwiftShader for WebGL unless `--use-angle=metal` and a headed
+context are asked for explicitly, and it does so silently — a first run of this
+measurement produced 19.9/282/1041 ms and would have been reported as Metal.
+`frame-timing.spec.ts` prints the renderer for exactly this reason; do not filter
+it out of the output.

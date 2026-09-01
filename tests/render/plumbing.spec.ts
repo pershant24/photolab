@@ -76,12 +76,15 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'halationBlurV',
     'halationComposite',
     'filmCurves',
+    // Grain after the curves: its magnitude depends on the developed density,
+    // which does not exist until they have produced it.
+    'grain',
     'toneCurve',
     'contrast',
     'display',
   ])
 
-  // Three of the thirteen passes run at the default edit: imageSource is
+  // Three of the fourteen passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
   //

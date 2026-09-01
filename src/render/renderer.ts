@@ -24,6 +24,7 @@ import { contrastPass } from './passes/contrast'
 import { createCurvePass } from './passes/curve'
 import { createFilmCurvesPass } from './passes/filmCurves'
 import { HALATION_PASSES } from './passes/halation'
+import { grainPass } from './passes/grain'
 import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
 import type { FilmCurvesPass } from './passes/filmCurves'
@@ -93,15 +94,29 @@ export const DRAG_PROXY_SCALE = 0.5
 /**
  * Frame interval above which a gesture is judged to be missing frames.
  *
- * 20ms rather than 16.7: a display refreshing at 60Hz delivers frames at 16.7ms
- * and normal jitter crosses that constantly, so a threshold exactly at budget
- * would engage the proxy on almost every drag. 20ms is one missed frame at 60Hz
- * with room for the jitter.
+ * 33ms, which is one missed frame at 60Hz — the median frame is failing to make
+ * at least one refresh.
+ *
+ * An earlier version used 20ms and engaged on drags that were perfectly healthy.
+ * Measured intervals on a trivial frame — a 64x48 buffer with every effect off —
+ * run 12 to 24ms with occasional spikes past 45ms, because a 60Hz display
+ * delivers 16.7ms nominal and normal jitter crosses 20 constantly. A threshold
+ * that close to budget cannot separate jitter from trouble. A genuinely
+ * struggling gesture in the same environment runs 240 to 300ms, so there is more
+ * than a factor of ten to aim at and no reason to sit near the noise.
  */
-export const DRAG_PROXY_FRAME_BUDGET_MS = 20
+export const DRAG_PROXY_FRAME_BUDGET_MS = 33
 
-/** Consecutive slow frames before engaging. One is noise; three is a pattern. */
-export const DRAG_PROXY_SLOW_FRAMES = 3
+/**
+ * How many recent frames the decision looks at.
+ *
+ * The statistic is the **median** of these, not a count of consecutive slow
+ * frames. A count is defeated by exactly the pattern real drags produce —
+ * alternating fast and slow — while a single garbage-collection spike can start
+ * one. The median ignores both: it takes three of five frames to be over budget
+ * before anything happens, and no individual outlier can trigger it.
+ */
+export const DRAG_PROXY_WINDOW = 5
 
 /**
  * Whether the drag proxy may engage.
@@ -128,7 +143,7 @@ export class Renderer {
   #dragProxyMode: DragProxyMode = 'auto'
   #gestureOpen = false
   #lastFrameAt = 0
-  #consecutiveSlowFrames = 0
+  #recentIntervals: number[] = []
   #frame: number | null = null
   #dirty = true
   #unsubscribe: () => void
@@ -151,6 +166,10 @@ export class Renderer {
       // density. Listed here rather than left to chance.
       ...HALATION_PASSES,
       this.#filmCurvesPass,
+      // Grain last inside the film stage, and registration order is what decides
+      // that: its magnitude depends on the developed density, which does not
+      // exist until the curves have produced it.
+      grainPass,
       testPatternPass,
       imageSourcePass,
       whiteBalancePass,
@@ -291,11 +310,11 @@ export class Renderer {
    * targets, which is affordable twice and not affordable per frame.
    */
   setInteracting(active: boolean): void {
-    this.#gestureOpen = active
     if (!active) {
       // Full resolution returns on release, always. The proxy is a concession to
       // a gesture in progress, not a state to be left in.
-      this.#consecutiveSlowFrames = 0
+      this.#gestureOpen = false
+      this.#recentIntervals = []
       this.#lastFrameAt = 0
       if (this.#interacting) {
         this.#interacting = false
@@ -303,6 +322,18 @@ export class Renderer {
       }
       return
     }
+
+    // Opening an already-open gesture decides nothing. `Viewport` derives this
+    // flag from the store and so calls it again on EVERY change during a drag,
+    // which is most frames of one — and an earlier version re-evaluated
+    // engagement each time, so in `auto` mode it drove an already-engaged proxy
+    // straight back to full resolution. The result was the exact oscillation the
+    // hold-for-the-gesture rule exists to prevent: engage, drop out, three slow
+    // frames, engage again.
+    if (this.#gestureOpen) return
+    this.#gestureOpen = true
+    this.#recentIntervals = []
+    this.#lastFrameAt = 0
 
     const engageImmediately = this.#dragProxyMode === 'always'
     if (this.#interacting !== engageImmediately) {
@@ -346,15 +377,17 @@ export class Renderer {
     const now = performance.now()
     const elapsed = this.#lastFrameAt === 0 ? 0 : now - this.#lastFrameAt
     this.#lastFrameAt = now
+    if (elapsed === 0) return
 
-    if (elapsed > DRAG_PROXY_FRAME_BUDGET_MS) {
-      this.#consecutiveSlowFrames += 1
-      if (this.#consecutiveSlowFrames >= DRAG_PROXY_SLOW_FRAMES) {
-        this.#interacting = true
-        this.#dirty = true
-      }
-    } else {
-      this.#consecutiveSlowFrames = 0
+    this.#recentIntervals.push(elapsed)
+    if (this.#recentIntervals.length > DRAG_PROXY_WINDOW) this.#recentIntervals.shift()
+    if (this.#recentIntervals.length < DRAG_PROXY_WINDOW) return
+
+    const sorted = [...this.#recentIntervals].sort((a, b) => a - b)
+    const median = sorted[Math.floor(sorted.length / 2)] ?? 0
+    if (median > DRAG_PROXY_FRAME_BUDGET_MS) {
+      this.#interacting = true
+      this.#dirty = true
     }
   }
 

@@ -145,6 +145,12 @@ test('frame time across proxy resolutions on a 12MP source', async ({ page }) =>
               halationStrength: 0.7,
               halationThreshold: 1.2,
               halationRadius: 0.008,
+              // Grain at the shipping default size, which is fine enough that
+              // the band-limit fade is engaged on the smaller buffers — so this
+              // measures the pass as it is actually run, not a coarse case that
+              // exercises less of it.
+              grainStrength: 0.6,
+              grainSize: 0.0009,
             },
           },
           context,
@@ -203,7 +209,7 @@ test('frame time across proxy resolutions on a 12MP source', async ({ page }) =>
     .join('\n')
 
   console.log(
-    `\nFrame time, 12MP source, full pass chain (ingest, exposure, halation, film curves, display)\n` +
+    `\nFrame time, 12MP source, full pass chain (ingest, exposure, halation, film curves, grain, display)\n` +
       `Renderer: ${report.renderer}\n${rows}\n` +
       `  (16.7 ms/frame is the 60Hz budget)\n`,
   )

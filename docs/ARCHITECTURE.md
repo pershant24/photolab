@@ -236,6 +236,36 @@ architectural change, no new stage, no change to the uniform contract. It is not
 done yet because nothing in the pipeline needs it before the film stage, not
 because it is unresolved.
 
+**A third recorded deviation: the preview cannot show fine grain.** Grain has a
+physical size and is expressed as a fraction of the source long edge like every
+other spatial parameter. Unlike the others it collides with sampling, because a
+few source pixels is below the proxy's Nyquist frequency.
+
+The size below which a buffer diverges from a full-resolution render is
+`GRAIN_FULL_AMPLITUDE_PERIOD / bufferScale`, which on a 2048px proxy of a 9500px
+source is **9.3 source pixels** — far above the default grain size, so this is
+the normal case rather than an edge one. Measured on a 6000px photograph at the
+default size, a full-resolution render carries obvious coloured grain and the
+proxy is *indistinguishable from grain switched off*.
+
+Sampled naively a hash below Nyquist does not vanish, it returns uncorrelated
+values at whatever rate it is sampled — full-amplitude noise one buffer pixel
+across, which is grain of the wrong size. Without the fade, a proxy draws grain
+at 96% of full amplitude for a period the export renders four times finer.
+
+So the amplitude is faded out as the period approaches the sampling rate: the
+preview shows *less* grain rather than *wrong* grain, understating an effect it
+cannot draw instead of overstating one it cannot. `tests/golden/grain-resolution.spec.ts`
+asserts the invariant above the limit and measures where the limit is, and does
+**not** try to make the invariant hold below it — forcing that would mean
+coarsening the export's grain until the preview could represent it, which is the
+preview dictating the picture.
+
+The consequence for a user is real and not yet addressed: **grain cannot be
+judged in the preview at the default size.** The fix is a 1:1 inspector, which
+does not exist yet; it is recorded here so it is a known gap rather than a
+surprise.
+
 **Every spatial parameter is normalised against image dimensions.** Grain size,
 blur radius, aberration offset, vignette falloff. A radius expressed in pixels
 looks different on a 2048px proxy than on a 6000px export, so preview would lie
