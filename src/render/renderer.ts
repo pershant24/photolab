@@ -119,6 +119,26 @@ export const DRAG_PROXY_FRAME_BUDGET_MS = 33
 export const DRAG_PROXY_WINDOW = 5
 
 /**
+ * The engagement decision, as a pure function of recent frame intervals.
+ *
+ * Extracted so it can be tested on given numbers rather than by arranging for a
+ * machine to be slow. The browser test that drives the real loop is still worth
+ * having — it is what found that `Viewport` re-opens the gesture every frame —
+ * but it cannot be the only cover, because whether any particular machine misses
+ * frames is not something a test can rely on. It did not reproduce on CI.
+ */
+export function shouldEngageDragProxy(
+  intervals: readonly number[],
+  budgetMs: number = DRAG_PROXY_FRAME_BUDGET_MS,
+): boolean {
+  if (intervals.length < DRAG_PROXY_WINDOW) return false
+  const recent = intervals.slice(-DRAG_PROXY_WINDOW)
+  const sorted = [...recent].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)] ?? 0
+  return median > budgetMs
+}
+
+/**
  * Whether the drag proxy may engage.
  *
  * `auto` is the shipping behaviour. The other two exist so a test can exercise
@@ -381,11 +401,8 @@ export class Renderer {
 
     this.#recentIntervals.push(elapsed)
     if (this.#recentIntervals.length > DRAG_PROXY_WINDOW) this.#recentIntervals.shift()
-    if (this.#recentIntervals.length < DRAG_PROXY_WINDOW) return
 
-    const sorted = [...this.#recentIntervals].sort((a, b) => a - b)
-    const median = sorted[Math.floor(sorted.length / 2)] ?? 0
-    if (median > DRAG_PROXY_FRAME_BUDGET_MS) {
+    if (shouldEngageDragProxy(this.#recentIntervals)) {
       this.#interacting = true
       this.#dirty = true
     }

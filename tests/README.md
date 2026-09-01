@@ -691,3 +691,30 @@ context are asked for explicitly, and it does so silently — a first run of thi
 measurement produced 19.9/282/1041 ms and would have been reported as Metal.
 `frame-timing.spec.ts` prints the renderer for exactly this reason; do not filter
 it out of the output.
+
+### Do not assert that a machine is fast, or that it is slow
+
+The drag proxy's engagement test was written to drive the real frame loop, which
+was the right instinct — it is what found that `Viewport` re-opens the gesture on
+every store change, and that a count of consecutive slow frames fires on a
+healthy drag. But its first form depended on a large buffer with the full film
+stage on the software rasteriser genuinely being hundreds of milliseconds a
+frame. That held locally and **did not hold on CI**, where the test failed.
+
+The mirror image is just as bad. A companion assertion that a *cheap* gesture
+must not engage the proxy needs the machine running it to be fast, and it passed
+and failed on consecutive local runs with nothing changing but load.
+
+So the rule is split:
+
+- **The decision, on given intervals**, is a pure function and is unit-tested in
+  `tests/unit/drag-proxy.test.ts` — including the measured jitter of a real
+  healthy drag (12–24 ms with spikes past 45), which is what the old rule tripped
+  over.
+- **The wiring** is tested in the browser, and every timing in it is made
+  deterministic by stalling wall-clock time between frames rather than by hoping
+  the renderer is expensive. The cause is synthetic; the elapsed time is real.
+
+What remains in the browser test is only what is deterministic on any machine: a
+stalled gesture engages, a stalled *non*-gesture does not, and `mode: 'never'`
+refuses regardless.

@@ -8,13 +8,16 @@ import { expect, test } from '@playwright/test'
  * other tests in this suite force the mode to `'always'`, which exercises what
  * the proxy does but not what decides to use it.
  *
- * This test drives the decision itself, and it is not flaky in either direction
- * because it does not rely on the machine being slow by accident. It runs on the
- * software rasteriser, where a large buffer with the full film stage is hundreds
- * of milliseconds per frame — more than an order of magnitude past the 20 ms
- * threshold, so the outcome is not a close call. The counterpart assertion, that
- * a cheap frame does NOT engage it, uses a tiny buffer that is equally far the
- * other way.
+ * This test drives the decision through the real wiring. The slow gesture is made
+ * slow **deliberately**, by stalling between frames, rather than by arranging for
+ * the renderer to be expensive: a first version relied on a large buffer with the
+ * full film stage on the software rasteriser being hundreds of milliseconds a
+ * frame, which held locally and did not on CI. Whether a given machine misses
+ * frames is not something a test can depend on.
+ *
+ * The stall is real wall-clock time, so what is exercised is genuinely the
+ * renderer noticing slow frames; only the cause is synthetic. The rule itself,
+ * on given intervals, is covered in `tests/unit/drag-proxy.test.ts`.
  *
  * # It has to run through requestAnimationFrame
  *
@@ -109,6 +112,7 @@ test.describe('the drag proxy engages on measured frame time', () => {
     canvas: { width: number; height: number },
     edit: Record<string, number>,
     milliseconds: number,
+    stallMs: number,
   ): Promise<{ engaged: boolean; engagedAfterRelease: boolean; frames: number }> {
     return page.evaluate<
       { engaged: boolean; engagedAfterRelease: boolean; frames: number },
@@ -116,8 +120,9 @@ test.describe('the drag proxy engages on measured frame time', () => {
         canvas: { width: number; height: number }
         edit: Record<string, number>
         milliseconds: number
+        stallMs: number
       }
-    >(async ({ canvas, edit, milliseconds }) => {
+    >(async ({ canvas, edit, milliseconds, stallMs }) => {
       const renderer = (window as unknown as { __photolabRenderer: RendererLike })
         .__photolabRenderer
       const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
@@ -154,6 +159,14 @@ test.describe('the drag proxy engages on measured frame time', () => {
       const deadline = performance.now() + milliseconds
       await new Promise<void>((resolve) => {
         const step = (): void => {
+          // Burn wall-clock time before letting the next frame render, so the
+          // interval the renderer measures is what this test says it is on any
+          // machine. A sleep would not do: the interval has to elapse between
+          // rendered frames, and the loop renders on the next animation frame.
+          if (stallMs > 0) {
+            const until = performance.now() + stallMs
+            while (performance.now() < until) { /* spin */ }
+          }
           renderer.syncSize(canvas)
           store.getState().setParameter('exposure', (frames % 20) / 200)
           frames++
@@ -171,7 +184,7 @@ test.describe('the drag proxy engages on measured frame time', () => {
       renderer.stop()
       store.getState().reset()
       return { engaged, engagedAfterRelease, frames }
-    }, { canvas, edit, milliseconds })
+    }, { canvas, edit, milliseconds, stallMs })
   }
 
   const HEAVY = {
@@ -184,28 +197,55 @@ test.describe('the drag proxy engages on measured frame time', () => {
   }
 
   test('engages once a gesture is missing frames, and lets go on release', async ({ page }) => {
-    // A large canvas with the full film stage on the software rasteriser. Frames
-    // here are hundreds of milliseconds, so the three-slow-frame condition is met
-    // immediately and by a wide margin.
-    const result = await gesture(page, { width: 1400, height: 1050 }, HEAVY, 4000)
+    // Frames are stalled to 60ms and up, so the median crosses the threshold
+    // within one window and the outcome does not depend on the hardware.
+    // 60ms of stall per frame: comfortably past the 33ms threshold on any
+    // machine, and nowhere near it by accident.
+    const result = await gesture(page, { width: 700, height: 525 }, HEAVY, 6000, 60)
     expect(result.frames).toBeGreaterThan(2)
     expect(result.engaged, 'the proxy never engaged on a gesture missing frames').toBe(true)
     // Full resolution returns on pointer-up, always.
     expect(result.engagedAfterRelease).toBe(false)
   })
 
-  test('stays out of the way when frames are cheap', async ({ page }) => {
-    // The whole point of making it conditional: on a gesture that holds frame
-    // rate the proxy costs 63% of high-frequency detail and buys nothing, so it
-    // must not engage. A tiny canvas with every effect off is far below the
-    // threshold on any hardware this can run on.
-    const result = await gesture(
-      page,
-      { width: 64, height: 48 },
-      { halationStrength: 0, grainStrength: 0, filmStrength: 0 },
-      1200,
+  test('does not engage when no gesture is open, however slow the frames', async ({ page }) => {
+    // The gating property, and it is deterministic: stall the frames well past
+    // the threshold but never open a gesture, and nothing should happen.
+    //
+    // The obvious counterpart — a CHEAP gesture must not engage — is deliberately
+    // NOT here. It needs the machine running the test to be fast, which is the
+    // same dependency that made the slow case fail on CI, mirrored. It passed and
+    // failed on consecutive local runs while nothing but machine load changed.
+    // Whether a loaded build agent holds 60Hz is not something to assert. The
+    // rule is covered on given intervals in `tests/unit/drag-proxy.test.ts`,
+    // against the measured jitter of a real healthy drag.
+    const engaged = await page.evaluate<boolean, { edit: Record<string, number> }>(
+      async ({ edit }) => {
+        const renderer = (window as unknown as { __photolabRenderer: RendererLike })
+          .__photolabRenderer
+        const store = (window as unknown as { __photolabStore: StoreLike }).__photolabStore
+        renderer.setDragProxyMode('auto')
+        store.getState().applyPatch(edit)
+        const canvas = { width: 700, height: 525 }
+        renderer.syncSize(canvas)
+        renderer.start()
+
+        for (let i = 0; i < 10; i++) {
+          const until = performance.now() + 60
+          while (performance.now() < until) { /* spin */ }
+          renderer.syncSize(canvas)
+          store.getState().setParameter('exposure', (i % 20) / 200)
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        }
+        const result = renderer.interacting
+        renderer.stop()
+        store.getState().reset()
+        return result
+      },
+      { edit: HEAVY },
     )
-    expect(result.engaged, 'the proxy engaged on a gesture that was keeping up').toBe(false)
+
+    expect(engaged, 'the proxy engaged without a gesture').toBe(false)
   })
 
   test('never engages when the mode forbids it, however slow the frames', async ({ page }) => {
