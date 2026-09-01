@@ -350,3 +350,75 @@ export function curveDomainToUnit(xs: readonly number[], x: number): number {
 export function lutTexCoord(unit: number, size: number): number {
   return (unit * (size - 1) + 0.5) / size
 }
+
+
+/**
+ * Reduce a densely sampled curve to the fewest control points that reproduce it
+ * within `tolerance`.
+ *
+ * This is the path a **digitised datasheet** takes. A characteristic curve read
+ * off a published graph arrives as a few hundred points traced by hand or by a
+ * plot digitiser, and those cannot be used as control points directly: the
+ * spline would chase the tracing noise, the derived lookup table resolution
+ * would balloon because `max |f''|` is dominated by that noise, and every
+ * wobble would be preserved as though it were part of the stock.
+ *
+ * Greedy insertion rather than a fixed decimation. Start with the two endpoints,
+ * find the sample the current fit misses by the most, add it, repeat until the
+ * worst error is under tolerance. That places control points **where the curve
+ * actually bends** — densely through a toe, sparsely along a straight
+ * midsection — which is the distribution a person would choose by hand and the
+ * one that keeps the lookup table small.
+ *
+ * The result is a starting shape to be tuned by eye, not a calibration. See the
+ * note on referredness at the top of `filmStock.ts`.
+ */
+export function fitControlPoints(
+  sampleXs: readonly number[],
+  sampleYs: readonly number[],
+  tolerance: number,
+  maxPoints = 24,
+): { xs: number[]; ys: number[] } {
+  const count = sampleXs.length
+  if (count !== sampleYs.length) {
+    throw new RangeError(`fitControlPoints: ${count} x values, ${sampleYs.length} y values`)
+  }
+  if (count < 2) throw new RangeError('fitControlPoints: need at least 2 samples')
+
+  // Indices of the samples currently used as control points, always sorted.
+  const chosen = [0, count - 1]
+
+  for (;;) {
+    const xs = chosen.map((i) => at(sampleXs, i))
+    const ys = chosen.map((i) => at(sampleYs, i))
+    const tangents = curveTangents(xs, ys)
+
+    let worstIndex = -1
+    let worstError = 0
+    for (let i = 1; i < count - 1; i++) {
+      if (chosen.includes(i)) continue
+      const error = Math.abs(
+        evaluateCurveWithTangents(xs, ys, tangents, at(sampleXs, i)) - at(sampleYs, i),
+      )
+      if (error > worstError) {
+        worstError = error
+        worstIndex = i
+      }
+    }
+
+    if (worstIndex < 0 || worstError <= tolerance || chosen.length >= maxPoints) {
+      return { xs, ys }
+    }
+
+    // Insert in place, so the control points stay sorted and the spline stays
+    // valid on the next iteration.
+    let position = chosen.length
+    for (let i = 0; i < chosen.length; i++) {
+      if ((chosen[i] ?? 0) > worstIndex) {
+        position = i
+        break
+      }
+    }
+    chosen.splice(position, 0, worstIndex)
+  }
+}

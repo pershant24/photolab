@@ -194,3 +194,52 @@ test.describe('parameter controls', () => {
     await expect(page.getByTestId('slider-contrast')).toBeVisible()
   })
 })
+
+test.describe('film stocks', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => '__photolabStore' in window)
+    await page.evaluate(() => {
+      ;(window as unknown as { __photolabStore: StoreLike }).__photolabStore.getState().reset()
+    })
+  })
+
+  test('applies a stock as one undoable preset, and clears it', async ({ page }) => {
+    // A stock is a Partial<EditState> merged in, which is what CLAUDE.md defines
+    // a preset to be. So it is one history entry, and the curves stay editable
+    // afterwards rather than being locked behind a "selected stock".
+    const curveLength = async (): Promise<number> =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __photolabStore: { getState(): { edit: { filmCurveRed: number[] } } }
+            }
+          ).__photolabStore.getState().edit.filmCurveRed.length,
+      )
+
+    expect(await curveLength(), 'starts at the two-point identity').toBe(4)
+
+    await page.getByTestId('stock-warm-portrait').click()
+    expect(await curveLength()).toBeGreaterThan(4)
+
+    const entries = await page.evaluate(
+      () =>
+        (window as unknown as { __photolabStore: StoreLike }).__photolabStore.getState().past
+          .length,
+    )
+    expect(entries, 'one entry for applying a stock').toBe(1)
+
+    await page.getByTestId('stock-none').click()
+    expect(await curveLength(), 'cleared back to the identity').toBe(4)
+
+    await page.getByTestId('undo').click()
+    expect(await curveLength(), 'undo brings the stock back').toBeGreaterThan(4)
+  })
+
+  test('offers every stock, and none is named after a real one', async ({ page }) => {
+    for (const id of ['warm-portrait', 'punchy-reversal', 'muted-documentary']) {
+      await expect(page.getByTestId(`stock-${id}`)).toBeVisible()
+    }
+  })
+})

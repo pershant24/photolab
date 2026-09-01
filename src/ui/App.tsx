@@ -3,6 +3,7 @@ import { useStore } from 'zustand'
 import { EDIT_PARAMETERS } from '../core/state/editState'
 import { editorStore } from '../core/state/editorStore'
 import { CurveEditor } from './CurveEditor'
+import { FilmStocks } from './FilmStocks'
 import { ParameterSlider } from './ParameterSlider'
 import { Viewport } from './Viewport'
 
@@ -46,6 +47,7 @@ function Adjustments() {
         {EDIT_PARAMETERS.map((descriptor) => (
           <ParameterSlider key={descriptor.key} descriptor={descriptor} />
         ))}
+        <FilmStocks />
         <CurveEditor />
       </div>
 

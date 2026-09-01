@@ -40,6 +40,10 @@ test.describe('curve editor', () => {
 
   test('adds a point where the pointer goes down, and drags it', async ({ page }) => {
     const editor = page.getByTestId('curve-editor')
+    // The panel scrolls now that the film stage has added controls above this,
+    // so the editor can sit below the fold and boundingBox would report a
+    // position the pointer cannot reach.
+    await editor.scrollIntoViewIfNeeded()
     const box = await editor.boundingBox()
     expect(box).not.toBeNull()
     if (!box) return
@@ -67,6 +71,10 @@ test.describe('curve editor', () => {
     // mutated it in place would rewrite the past rather than adding to it, and
     // undo would return to a curve that had silently changed underneath it.
     const editor = page.getByTestId('curve-editor')
+    // The panel scrolls now that the film stage has added controls above this,
+    // so the editor can sit below the fold and boundingBox would report a
+    // position the pointer cannot reach.
+    await editor.scrollIntoViewIfNeeded()
     const box = await editor.boundingBox()
     if (!box) return
 
@@ -94,6 +102,10 @@ test.describe('curve editor', () => {
 
   test('removes an interior point on double click', async ({ page }) => {
     const editor = page.getByTestId('curve-editor')
+    // The panel scrolls now that the film stage has added controls above this,
+    // so the editor can sit below the fold and boundingBox would report a
+    // position the pointer cannot reach.
+    await editor.scrollIntoViewIfNeeded()
     const box = await editor.boundingBox()
     if (!box) return
 

@@ -71,14 +71,15 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'ingest',
     'whiteBalance',
     'exposure',
+    'filmCurves',
     'toneCurve',
     'contrast',
     'display',
   ])
 
-  // Three of the eight passes run at the default edit: imageSource is disabled
-  // with no image, and white balance, exposure, the tone curve and contrast are
-  // all at their identity values. A disabled pass costs neither a program nor a
+  // Three of the nine passes run at the default edit: imageSource is disabled
+  // with no image, and white balance, exposure, the film curves, the tone curve
+  // and contrast are all at their identity values. A disabled pass costs neither a program nor a
   // draw — which is also what makes "neutral white balance is an exact identity"
   // true rather than nearly true.
   expect(counts.afterFirstFrame, 'one program per enabled pass').toBe(3)

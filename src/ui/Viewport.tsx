@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { FILM_STOCKS } from '../core/colour/filmStock'
 import { editorStore } from '../core/state/editorStore'
 import type { EditorStoreState } from '../core/state/editorStore'
 import { RendererUnsupportedError } from '../render/gl/context'
@@ -95,9 +96,11 @@ export function Viewport() {
     const hooks = window as unknown as {
       __photolabRenderer?: Renderer
       __photolabStore?: typeof editorStore
+      __photolabFilmStocks?: typeof FILM_STOCKS
     }
     hooks.__photolabRenderer = renderer
     hooks.__photolabStore = editorStore
+    hooks.__photolabFilmStocks = FILM_STOCKS
 
     return () => {
       observer.disconnect()
@@ -108,6 +111,7 @@ export function Viewport() {
       sessionRef.current = null
       delete hooks.__photolabRenderer
       delete hooks.__photolabStore
+      delete hooks.__photolabFilmStocks
     }
   }, [])
 

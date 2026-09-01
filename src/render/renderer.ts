@@ -22,8 +22,10 @@ import { whiteBalancePass } from './passes/whiteBalance'
 import { exposurePass } from './passes/exposure'
 import { contrastPass } from './passes/contrast'
 import { createCurvePass } from './passes/curve'
+import { createFilmCurvesPass } from './passes/filmCurves'
 import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
+import type { FilmCurvesPass } from './passes/filmCurves'
 import type { PassContext, RenderInput, RenderSource, ViewState } from './passes/types'
 import { DEFAULT_VIEW_STATE } from './passes/types'
 import { uploadImageTexture } from './gl/texture'
@@ -72,6 +74,7 @@ export class Renderer {
   #view: ViewState = DEFAULT_VIEW_STATE
   #source: RenderSource = { kind: 'pattern' }
   #curvePass: CurvePass
+  #filmCurvesPass: FilmCurvesPass
   #interacting = false
   #renderCount = 0
   #frame: number | null = null
@@ -82,6 +85,7 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.#context = createRenderContext(canvas)
     this.#curvePass = createCurvePass()
+    this.#filmCurvesPass = createFilmCurvesPass()
     this.#graph = new RenderGraph(this.#context, [
       // Registration order is not execution order; the graph sorts by stage.
       // Deliberately listed out of order here so that the ordering test is
@@ -89,6 +93,7 @@ export class Renderer {
       displayPass,
       this.#curvePass,
       contrastPass,
+      this.#filmCurvesPass,
       testPatternPass,
       imageSourcePass,
       whiteBalancePass,
@@ -113,6 +118,10 @@ export class Renderer {
   /** Exposed so a test can assert that a rebake happens per change, not per frame. */
   get curveBakeCount(): number {
     return this.#curvePass.bakeCount
+  }
+
+  get filmBakeCount(): number {
+    return this.#filmCurvesPass.bakeCount
   }
 
   get context(): RenderContext {

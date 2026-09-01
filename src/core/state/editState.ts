@@ -1,5 +1,7 @@
 import { encodeACEScct } from '../colour/transfer'
 import { NEUTRAL_TEMPERATURE, NEUTRAL_TINT } from '../colour/whiteBalance'
+import { FILM_DOMAIN, IDENTITY_CHANNEL, isIdentityChannel } from '../colour/filmStock'
+import type { FilmStock } from '../colour/filmStock'
 import { TONE_MAP_KNEE } from '../colour/display'
 
 /**
@@ -73,6 +75,21 @@ export interface EditState {
 
   /** Green to magenta correction, perpendicular to the Planckian locus. */
   readonly tint: number
+
+  /**
+   * The film stage's three characteristic curves, one per channel.
+   *
+   * Three separate parameters rather than one grouped object, because the
+   * flatness rule at the top of this file is what keeps snapshots, merges and
+   * persistence free of special cases — and because they are independently
+   * editable, which is the whole point of having three.
+   */
+  readonly filmCurveRed: number[]
+  readonly filmCurveGreen: number[]
+  readonly filmCurveBlue: number[]
+
+  /** How far toward the film curves to go. 0 is off, 1 is the stock as designed. */
+  readonly filmStrength: number
 }
 
 /** The keys of `EditState` whose values are numbers. */
@@ -163,6 +180,15 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    key: 'filmStrength',
+    label: 'Film strength',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 1,
+    unit: '',
+  },
+  {
     key: 'toneMapKnee',
     label: 'Highlight roll-off',
     // A single default cannot serve both an unedited photograph and a heavily
@@ -213,6 +239,10 @@ export const DEFAULT_EDIT_STATE: EditState = {
   tint: NEUTRAL_TINT,
   toneMapKnee: TONE_MAP_KNEE,
   toneCurve: [TONE_CURVE_DOMAIN[0], TONE_CURVE_DOMAIN[0], 1, 1],
+  filmCurveRed: [...IDENTITY_CHANNEL],
+  filmCurveGreen: [...IDENTITY_CHANNEL],
+  filmCurveBlue: [...IDENTITY_CHANNEL],
+  filmStrength: 1,
 }
 
 /**
@@ -247,7 +277,43 @@ export const CURVE_PARAMETERS: readonly CurveDescriptor[] = [
     domain: TONE_CURVE_DOMAIN,
     defaultValue: [TONE_CURVE_DOMAIN[0], TONE_CURVE_DOMAIN[0], 1, 1],
   },
+  { key: 'filmCurveRed', label: 'Film red', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
+  { key: 'filmCurveGreen', label: 'Film green', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
+  { key: 'filmCurveBlue', label: 'Film blue', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
 ]
+
+/**
+ * A film stock as a `Partial<EditState>` — which is what a preset is.
+ *
+ * Deliberately *not* a `filmStock: string` parameter. That would have been a
+ * third kind of parameter, after numbers and curves, and the tables would then
+ * have needed walking together everywhere — which is the trigger recorded in
+ * `tests/README.md` for replacing them with a registry.
+ *
+ * Making a stock a preset avoids the question rather than answering it, and is
+ * the better model anyway: `CLAUDE.md` already defines a preset as a
+ * `Partial<EditState>` applied by merge, the three curves stay independently
+ * editable after a stock is applied, and nothing has to remember which stock
+ * "is selected" once the curves have been touched. The registry trigger stands
+ * for whenever a genuinely new kind arrives.
+ */
+export function filmStockPatch(stock: FilmStock): Partial<EditState> {
+  return {
+    filmCurveRed: [...stock.red],
+    filmCurveGreen: [...stock.green],
+    filmCurveBlue: [...stock.blue],
+  }
+}
+
+/** Whether the film stage would do anything. */
+export function isFilmStageIdentity(state: EditState): boolean {
+  return (
+    state.filmStrength === 0 ||
+    (isIdentityChannel(state.filmCurveRed) &&
+      isIdentityChannel(state.filmCurveGreen) &&
+      isIdentityChannel(state.filmCurveBlue))
+  )
+}
 
 /**
  * Bring a control point array into a usable state, or fall back to the default.
