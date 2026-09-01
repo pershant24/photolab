@@ -146,8 +146,7 @@ interface RendererLike {
     passIds: string[]
     pool: { acquire(w: number, h: number): { framebuffer: unknown; width: number; height: number }; release(t: unknown): void }
     render(
-      source: { kind: string },
-      state: { displayMode: string; patternPhase: number },
+      input: unknown,
       context: unknown,
       options?: {
         onPassComplete?: (id: string, target: unknown) => void
@@ -156,6 +155,7 @@ interface RendererLike {
     ): void
   }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
+  input: unknown
   source: { kind: string }
   passContext(): unknown
   syncSize(available?: { width: number; height: number }): boolean
@@ -198,8 +198,7 @@ async function measureBothLegs(page: import('@playwright/test').Page): Promise<L
       const finalTarget = renderer.graph.pool.acquire(canvas.width, canvas.height)
       try {
         renderer.graph.render(
-          renderer.source,
-          { displayMode: 'sdr', patternPhase: 0 },
+          renderer.input,
           renderer.passContext(),
           {
             finalTarget,

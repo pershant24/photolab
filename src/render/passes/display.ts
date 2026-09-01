@@ -10,7 +10,7 @@
 
 import fragmentSource from '../shaders/display.frag'
 
-import type { DisplayMode, Pass, RenderState } from './types'
+import type { DisplayMode, Pass, RenderInput } from './types'
 
 /**
  * Prepended after `#version`, which the program cache adds. A `#define` is the
@@ -26,12 +26,12 @@ export const displayPass: Pass = {
   id: 'display',
   stage: 'display',
 
-  fragmentSource: (state: RenderState) => defines(state.displayMode) + fragmentSource,
+  fragmentSource: (input: RenderInput) => defines(input.view.displayMode) + fragmentSource,
 
   // The one thing that changes the source, and therefore the only thing in the
   // key. If a value can change while the source stays byte-identical it belongs
   // in a uniform, and putting it here would mean recompiling to set it.
-  variantKey: (state: RenderState) => state.displayMode,
+  variantKey: (input: RenderInput) => input.view.displayMode,
 
   enabled: () => true,
 

@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { editorStore } from '../core/state/editorStore'
 import { RendererUnsupportedError } from '../render/gl/context'
 import { ImageLoader, isSupersededError } from '../render/imageLoader'
-import { DEFAULT_RENDER_STATE, Renderer } from '../render/renderer'
+import { Renderer } from '../render/renderer'
 
 type Status = { kind: 'starting' } | { kind: 'running' } | { kind: 'failed'; message: string }
 
@@ -54,7 +55,12 @@ export function Viewport() {
     const loader = new ImageLoader()
     sessionRef.current = { renderer, loader }
 
-    renderer.setState(DEFAULT_RENDER_STATE)
+    // The store is the only writer of edit parameters, and the renderer is a
+    // reader of it. Nothing else pushes state in, so there is one path from a
+    // pointer event to a pixel and no way for the two to disagree.
+    renderer.setEdit(editorStore.getState().edit)
+    const unsubscribeStore = editorStore.subscribe((next) => renderer.setEdit(next.edit))
+
     const unsubscribe = renderer.context.onStatusChange((next) => setContextLost(next === 'lost'))
 
     const available = (): { width: number; height: number } => ({
@@ -79,6 +85,7 @@ export function Viewport() {
 
     return () => {
       observer.disconnect()
+      unsubscribeStore()
       unsubscribe()
       loader.dispose()
       renderer.dispose()

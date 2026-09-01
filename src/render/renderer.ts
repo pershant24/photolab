@@ -10,6 +10,8 @@
  * drains, show the oldest result last.
  */
 
+import type { EditState } from '../core/state/editState'
+import { DEFAULT_EDIT_STATE } from '../core/state/editState'
 import type { RenderContext } from './gl/context'
 import { createRenderContext } from './gl/context'
 import { RenderGraph } from './graph'
@@ -17,7 +19,8 @@ import { testPatternPass } from './passes/testPattern'
 import { imageSourcePass } from './passes/imageSource'
 import { ingestPass } from './passes/ingest'
 import { displayPass } from './passes/display'
-import type { PassContext, RenderSource, RenderState } from './passes/types'
+import type { PassContext, RenderInput, RenderSource, ViewState } from './passes/types'
+import { DEFAULT_VIEW_STATE } from './passes/types'
 import { uploadImageTexture } from './gl/texture'
 
 /**
@@ -32,15 +35,13 @@ import { uploadImageTexture } from './gl/texture'
  */
 const NOMINAL_SOURCE_LONG_EDGE = 4096
 
-export const DEFAULT_RENDER_STATE: RenderState = {
-  displayMode: 'sdr',
-  patternPhase: 0,
-}
+
 
 export class Renderer {
   #context: RenderContext
   #graph: RenderGraph
-  #state: RenderState = DEFAULT_RENDER_STATE
+  #edit: EditState = DEFAULT_EDIT_STATE
+  #view: ViewState = DEFAULT_VIEW_STATE
   #source: RenderSource = { kind: 'pattern' }
   #frame: number | null = null
   #dirty = true
@@ -77,13 +78,25 @@ export class Renderer {
     return this.#context
   }
 
-  get state(): RenderState {
-    return this.#state
+  get input(): RenderInput {
+    return { source: this.#source, edit: this.#edit, view: this.#view }
   }
 
-  /** Store state. Rendering happens on the next frame, not here. */
-  setState(next: RenderState): void {
-    this.#state = next
+  /**
+   * Store the edit. Rendering happens on the next frame, not here.
+   *
+   * This is the whole of the pointer-event path: an event updates the store, the
+   * store updates this, and the frame loop reads it. A synchronous render from
+   * here would render several times per frame during a drag and, because events
+   * queue faster than the GPU drains, show the oldest result last.
+   */
+  setEdit(next: EditState): void {
+    this.#edit = next
+    this.#dirty = true
+  }
+
+  setView(next: ViewState): void {
+    this.#view = next
     this.#dirty = true
   }
 
@@ -227,7 +240,7 @@ export class Renderer {
   renderNow(available?: { readonly width: number; readonly height: number }): void {
     if (this.#disposed) return
     this.syncSize(available)
-    this.#graph.render(this.#source, this.#state, this.passContext())
+    this.#graph.render(this.input, this.passContext())
   }
 
   dispose(): void {

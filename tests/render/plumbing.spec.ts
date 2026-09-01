@@ -10,7 +10,8 @@ import { expect, test } from '@playwright/test'
 interface RendererLike {
   graph: { compileCount: number; allocationCount: number; passIds: string[] }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
-  setState(next: { displayMode: string; patternPhase: number }): void
+  setEdit(next: { exposure: number; contrast: number }): void
+  setView(next: { displayMode: string }): void
   renderNow(): void
   stop(): void
 }
@@ -22,24 +23,24 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
   const counts = await page.evaluate(() => {
     const renderer = (window as unknown as { __photolabRenderer: RendererLike }).__photolabRenderer
     renderer.stop()
-    renderer.setState({ displayMode: 'sdr', patternPhase: 0 })
+    renderer.setView({ displayMode: 'sdr' })
     renderer.renderNow()
 
     const afterFirstFrame = renderer.graph.compileCount
     const allocationsAfterFirstFrame = renderer.graph.allocationCount
 
     for (let frame = 0; frame < 60; frame++) {
-      renderer.setState({ displayMode: 'sdr', patternPhase: frame / 60 })
+      renderer.setEdit({ exposure: -5 + (10 * frame) / 60, contrast: 1 })
       renderer.renderNow()
     }
     const afterDrag = renderer.graph.compileCount
     const allocationsAfterDrag = renderer.graph.allocationCount
 
-    renderer.setState({ displayMode: 'identity', patternPhase: 0 })
+    renderer.setView({ displayMode: 'identity' })
     renderer.renderNow()
     const afterVariant = renderer.graph.compileCount
 
-    renderer.setState({ displayMode: 'sdr', patternPhase: 0 })
+    renderer.setView({ displayMode: 'sdr' })
     renderer.renderNow()
     const afterReturningToKnownVariant = renderer.graph.compileCount
 

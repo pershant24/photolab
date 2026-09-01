@@ -23,9 +23,10 @@ export const imageSourcePass: Pass = {
   fragmentSource: () => fragmentSource,
   variantKey: () => 'default',
 
-  enabled: (_state, source) => source.kind === 'image',
+  enabled: (input) => input.source.kind === 'image',
 
-  bindUniforms(gl, locate, _state, _context, source) {
+  bindUniforms(gl, locate, input) {
+    const source = input.source
     if (source.kind !== 'image') return
     const image = locate('uImage')
     if (!image) return

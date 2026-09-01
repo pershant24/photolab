@@ -21,7 +21,7 @@ import { ProgramCache } from './gl/program'
 import type { FullScreenQuad } from './gl/quad'
 import { createFullScreenQuad } from './gl/quad'
 import quadVertexSource from './shaders/quad.vert'
-import type { Pass, PassContext, RenderSource, RenderState } from './passes/types'
+import type { Pass, PassContext, RenderInput } from './passes/types'
 import { STAGES } from './passes/types'
 
 export class RenderGraphError extends Error {
@@ -160,24 +160,20 @@ export class RenderGraph {
   /**
    * Render one frame into the canvas.
    *
-   * `source` is separate from `state` on purpose: it is the `sourceImage` half
-   * of `render(sourceImage, EditState)`, and a GPU texture can never live in an
-   * `EditState` that has to stay flat, serialisable and snapshot-able for undo.
+   * `input` carries the source image, the edit parameters and the viewing
+   * settings as three separate members on purpose: a GPU texture can never live
+   * in an `EditState` that has to stay flat and snapshot-able for undo, and a
+   * debug view switch must never enter undo history at all.
    *
    * The chain ping-pongs between two pooled targets; the last enabled pass draws
    * straight to the default framebuffer rather than into a target that would
    * then have to be blitted.
    */
-  render(
-    source: RenderSource,
-    state: RenderState,
-    context: PassContext,
-    options: RenderOptions = {},
-  ): void {
+  render(input: RenderInput, context: PassContext, options: RenderOptions = {}): void {
     const { gl } = this.#context
     if (this.#context.status() === 'lost') return
 
-    const active = this.#passes.filter((pass) => pass.enabled(state, source))
+    const active = this.#passes.filter((pass) => pass.enabled(input))
     if (active.length === 0) return
 
     // Checked per frame, not once at construction: which source pass is enabled
@@ -193,7 +189,7 @@ export class RenderGraph {
     const [width, height] = context.resolution
     this.#quad.bind()
 
-    let input: RenderTarget | null = null
+    let readFrom: RenderTarget | null = null
 
     for (let i = 0; i < active.length; i++) {
       const pass = active[i]
@@ -209,13 +205,13 @@ export class RenderGraph {
 
       const compiled = this.#programs.get(
         pass.id,
-        pass.variantKey(state),
-        pass.fragmentSource(state),
+        pass.variantKey(input),
+        pass.fragmentSource(input),
       )
       gl.useProgram(compiled.program)
 
-      this.#bindContractUniforms(compiled.uniformLocation.bind(compiled), context, input, pass)
-      pass.bindUniforms(gl, compiled.uniformLocation.bind(compiled), state, context, source)
+      this.#bindContractUniforms(compiled.uniformLocation.bind(compiled), context, readFrom, pass)
+      pass.bindUniforms(gl, compiled.uniformLocation.bind(compiled), input, context)
 
       this.#quad.draw()
 
@@ -225,12 +221,12 @@ export class RenderGraph {
       options.onPassComplete?.(pass.id, output)
 
       // Released only after the draw that reads it has been issued.
-      if (input) this.#pool.release(input)
+      if (readFrom) this.#pool.release(readFrom)
       // A caller-supplied final target is not the pool's to hand back.
-      input = output === options.finalTarget ? null : output
+      readFrom = output === options.finalTarget ? null : output
     }
 
-    if (input) this.#pool.release(input)
+    if (readFrom) this.#pool.release(readFrom)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.bindVertexArray(null)
@@ -258,7 +254,7 @@ export class RenderGraph {
   #bindContractUniforms(
     locate: (name: string) => WebGLUniformLocation | null,
     context: PassContext,
-    input: RenderTarget | null,
+    readFrom: RenderTarget | null,
     pass: Pass,
   ): void {
     const { gl } = this.#context
@@ -282,13 +278,13 @@ export class RenderGraph {
 
     const source = locate('uSource')
     if (source) {
-      if (!input) {
+      if (!readFrom) {
         throw new RenderGraphError(
           `pass "${pass.id}" declares uSource but is first in the chain and has no input`,
         )
       }
       gl.activeTexture(gl.TEXTURE0)
-      gl.bindTexture(gl.TEXTURE_2D, input.texture)
+      gl.bindTexture(gl.TEXTURE_2D, readFrom.texture)
       gl.uniform1i(source, 0)
     }
   }

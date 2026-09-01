@@ -18,18 +18,12 @@ uniform vec4 uSourceRect;
 
 uniform vec3 uPatches[PATCH_COUNT];
 
-// A runtime parameter, present to prove the recompile boundary: it changes every
-// frame of a drag and must never cause a shader to be built. It slides the ramp
-// so that a stuck frame is visible by eye.
-uniform float uPatternPhase;
-
 in vec2 vTexCoord;
 out vec4 fragColour;
 
 void main() {
     if (vTexCoord.y < RAMP_HEIGHT) {
-        float t = fract(vTexCoord.x + uPatternPhase);
-        fragColour = vec4(vec3(t), 1.0);
+        fragColour = vec4(vec3(vTexCoord.x), 1.0);
         return;
     }
 

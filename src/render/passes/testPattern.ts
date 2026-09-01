@@ -23,13 +23,10 @@ export const testPatternPass: Pass = {
   // Nothing about this pass's source varies, so every state shares one program.
   variantKey: () => 'default',
 
-  enabled: (_state, source) => source.kind === 'pattern',
+  enabled: (input) => input.source.kind === 'pattern',
 
-  bindUniforms(gl, locate, state) {
+  bindUniforms(gl, locate) {
     const patches = locate(`uPatches[0]`)
     if (patches) gl.uniform3fv(patches, PATCHES, 0, PATCH_COUNT * 3)
-
-    const phase = locate('uPatternPhase')
-    if (phase) gl.uniform1f(phase, state.patternPhase)
   },
 }

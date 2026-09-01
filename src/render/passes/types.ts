@@ -2,6 +2,7 @@
  * The pass contract, and the stage ordering every pass is placed into.
  */
 
+import type { EditState } from '../../core/state/editState'
 import type { RenderTarget } from '../gl/target'
 
 /**
@@ -52,20 +53,39 @@ export type RenderSource =
     }
 
 /**
- * Placeholder editor state for the plumbing.
+ * Settings that describe how the edit is being *viewed*, not what it is.
  *
- * `EditState` proper lands in `src/core/state/` with the first real adjustment.
- * These two fields exist because they are the two sides of the boundary that
- * `ProgramCache` enforces, and a test needs both to assert it:
+ * Deliberately separate from `EditState`. These do not describe the photograph,
+ * so they must not enter undo history — stepping back through view changes is
+ * not what anyone means by undo — and they must not enter a preset, which would
+ * carry one machine's debug switch onto another's edit.
  *
- * - `displayMode` is **compile-time**. It selects a different fragment source,
- *   so changing it is a legitimate recompile.
- * - `patternPhase` is **runtime**. It is a uniform, so changing it must never
- *   compile anything, however many times it changes during a drag.
+ * `displayMode` is also the project's one **compile-time** parameter: it selects
+ * a different fragment source, so changing it legitimately compiles. That
+ * boundary is real and the program cache depends on it, which is why the
+ * distinction survives even though the placeholder that used to demonstrate it
+ * is gone. Everything in `EditState` is a uniform.
  */
-export interface RenderState {
+export interface ViewState {
   readonly displayMode: DisplayMode
-  readonly patternPhase: number
+}
+
+export const DEFAULT_VIEW_STATE: ViewState = { displayMode: 'sdr' }
+
+/**
+ * Everything a frame is rendered from.
+ *
+ * The three members are kept apart rather than merged into one bag because they
+ * have three different lifetimes and three different rules. `source` is a GPU
+ * texture and can never be serialised; `edit` is snapshotted into undo history
+ * and must always be serialisable; `view` is neither. This is
+ * `render(sourceImage, EditState)` with the viewing settings made explicit
+ * instead of hidden.
+ */
+export interface RenderInput {
+  readonly source: RenderSource
+  readonly edit: EditState
+  readonly view: ViewState
 }
 
 /**
@@ -99,18 +119,26 @@ export interface Pass {
    */
   readonly isSource?: boolean
 
-  /** Fragment source for the given state. May differ between variants. */
-  fragmentSource(state: RenderState): string
+  /** Fragment source for the given input. May differ between variants. */
+  fragmentSource(input: RenderInput): string
 
   /**
    * A key covering **only** what changes the generated source. Never a parameter
    * value: if something can change while the source stays byte-identical it is a
    * uniform, and putting it here means recompiling in order to set it.
    */
-  variantKey(state: RenderState): string
+  variantKey(input: RenderInput): string
 
-  /** Whether this pass runs at all. Changing this changes the graph structure. */
-  enabled(state: RenderState, source: RenderSource): boolean
+  /**
+   * Whether this pass runs at all.
+   *
+   * This is the one thing `EditState` legitimately changes about graph
+   * *structure*: a pass whose parameter sits at its identity value is skipped
+   * entirely rather than running as an expensive no-op. The first time it is
+   * enabled its program compiles; after that the cache serves it, so toggling
+   * across the identity value during a drag costs one compile in total.
+   */
+  enabled(input: RenderInput): boolean
 
   /**
    * Bind everything beyond the four contract uniforms, which the graph has
@@ -120,9 +148,8 @@ export interface Pass {
   bindUniforms(
     gl: WebGL2RenderingContext,
     locate: (name: string) => WebGLUniformLocation | null,
-    state: RenderState,
+    input: RenderInput,
     context: PassContext,
-    source: RenderSource,
   ): void
 }
 

@@ -5,7 +5,7 @@ import type { ProgramGL } from '../../src/render/gl/program'
 import { displayPass } from '../../src/render/passes/display'
 import { ingestPass } from '../../src/render/passes/ingest'
 import { testPatternPass } from '../../src/render/passes/testPattern'
-import type { RenderState } from '../../src/render/passes/types'
+import type { RenderInput } from '../../src/render/passes/types'
 
 /**
  * A counting stand-in for the parts of WebGL2 the cache touches.
@@ -67,8 +67,12 @@ function stubGL(options: { linkFails?: boolean; compileFails?: boolean } = {}): 
 
 const VERTEX = 'void main() { gl_Position = vec4(0.0); }'
 
-function state(overrides: Partial<RenderState> = {}): RenderState {
-  return { displayMode: 'sdr', patternPhase: 0, ...overrides }
+function input(overrides: { displayMode?: 'sdr' | 'identity'; exposure?: number } = {}): RenderInput {
+  return {
+    source: { kind: 'pattern' },
+    edit: { exposure: overrides.exposure ?? 0, contrast: 1 },
+    view: { displayMode: overrides.displayMode ?? 'sdr' },
+  }
 }
 
 describe('program cache', () => {
@@ -160,6 +164,11 @@ describe('the recompile boundary the real passes sit on', () => {
   // a variantKey that quietly includes a continuous value — a key built by
   // stringifying a whole state object, say — so these assert the exact compile
   // count rather than merely that it did not grow.
+  //
+  // The parameter driven here is `exposure`, which no pass consumes yet: the
+  // exposure and contrast passes land in part D. Until they do, this asserts
+  // that no *existing* pass keys on an EditState value, which is weaker than it
+  // will be. It strengthens on its own once those passes exist.
   const PASSES = [testPatternPass, ingestPass, displayPass]
 
   it('compiles nothing extra across a drag of a runtime parameter', () => {
@@ -167,7 +176,7 @@ describe('the recompile boundary the real passes sit on', () => {
     const cache = new ProgramCache(gl, VERTEX)
 
     for (let frame = 0; frame < 120; frame++) {
-      const current = state({ patternPhase: frame / 120 })
+      const current = input({ exposure: -5 + (10 * frame) / 120 })
       for (const pass of PASSES) {
         cache.get(pass.id, pass.variantKey(current), pass.fragmentSource(current))
       }
@@ -181,27 +190,29 @@ describe('the recompile boundary the real passes sit on', () => {
     const gl = stubGL()
     const cache = new ProgramCache(gl, VERTEX)
 
-    const build = (s: RenderState): void => {
-      for (const pass of PASSES) cache.get(pass.id, pass.variantKey(s), pass.fragmentSource(s))
+    const build = (current: RenderInput): void => {
+      for (const pass of PASSES) {
+        cache.get(pass.id, pass.variantKey(current), pass.fragmentSource(current))
+      }
     }
 
-    build(state({ displayMode: 'sdr' }))
+    build(input({ displayMode: 'sdr' }))
     expect(cache.compileCount).toBe(3)
 
-    build(state({ displayMode: 'identity' }))
+    build(input({ displayMode: 'identity' }))
     expect(cache.compileCount).toBe(4)
 
     // Returning to a variant already built compiles nothing.
-    build(state({ displayMode: 'sdr' }))
-    build(state({ displayMode: 'identity' }))
+    build(input({ displayMode: 'sdr' }))
+    build(input({ displayMode: 'identity' }))
     expect(cache.compileCount).toBe(4)
   })
 
   it('gives the two display variants genuinely different source', () => {
     // If the variant key changed but the source did not, the cache would hold
     // two identical programs and the mode toggle would do nothing visible.
-    const sdr = displayPass.fragmentSource(state({ displayMode: 'sdr' }))
-    const identity = displayPass.fragmentSource(state({ displayMode: 'identity' }))
+    const sdr = displayPass.fragmentSource(input({ displayMode: 'sdr' }))
+    const identity = displayPass.fragmentSource(input({ displayMode: 'identity' }))
 
     expect(sdr).not.toBe(identity)
     expect(identity).toContain('#define DISPLAY_IDENTITY')
@@ -215,9 +226,9 @@ describe('the recompile boundary the real passes sit on', () => {
     for (const pass of PASSES) {
       const keys = new Set<string>()
       for (let i = 0; i < 50; i++) {
-        keys.add(pass.variantKey(state({ patternPhase: i / 50 })))
+        keys.add(pass.variantKey(input({ exposure: -5 + (10 * i) / 50 })))
       }
-      expect(keys.size, `${pass.id} varies its variant key with patternPhase`).toBe(1)
+      expect(keys.size, `${pass.id} varies its variant key with an EditState value`).toBe(1)
     }
   })
 })
