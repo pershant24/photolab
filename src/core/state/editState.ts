@@ -1,3 +1,7 @@
+import { encodeACEScct } from '../colour/transfer'
+import { NEUTRAL_TEMPERATURE, NEUTRAL_TINT } from '../colour/whiteBalance'
+import { TONE_MAP_KNEE } from '../colour/display'
+
 /**
  * `EditState`: every parameter the renderer reads, in one flat object.
  *
@@ -39,6 +43,36 @@ export interface EditState {
    * above 1 steepens, `0` flattens the image to middle grey.
    */
   readonly contrast: number
+
+  /**
+   * Where the display transform's highlight roll-off begins, in display-linear.
+   *
+   * A creative parameter rather than a technical one, which is why it lives here
+   * and is carried by undo and by presets. It is the white point seen from the
+   * other end: `f(1.0) = (1 + knee) / 2`, so the code values it gives up below
+   * white are exactly the ones it gains above. See `src/core/colour/display.ts`.
+   */
+  readonly toneMapKnee: number
+
+  /**
+   * Tone curve control points, interleaved as `[x0, y0, x1, y1, ...]`.
+   *
+   * One flat array rather than two, or an array of pairs, because the flatness
+   * rule at the top of this file is what keeps snapshots, merges and persistence
+   * working without special cases. An array of `{x, y}` objects would survive a
+   * JSON round trip too, but it is the first step toward a shape where some
+   * parameters are objects and the machinery has to know which.
+   *
+   * `x` values must be strictly increasing. The default is the two-point
+   * identity, at which the pass is skipped entirely.
+   */
+  readonly toneCurve: number[]
+
+  /** Colour temperature of the light the scene was under, in kelvin. */
+  readonly temperature: number
+
+  /** Green to magenta correction, perpendicular to the Planckian locus. */
+  readonly tint: number
 }
 
 /** The keys of `EditState` whose values are numbers. */
@@ -107,6 +141,48 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     defaultValue: 1,
     unit: '',
   },
+  {
+    key: 'temperature',
+    label: 'Temperature',
+    // The range the Planckian fit is valid over, narrowed at the top: above
+    // about 12000K the locus is so close to flat that the slider stops doing
+    // anything visible, and the remaining travel is wasted.
+    min: 2000,
+    max: 12000,
+    step: 10,
+    defaultValue: NEUTRAL_TEMPERATURE,
+    unit: 'K',
+  },
+  {
+    key: 'tint',
+    label: 'Tint',
+    min: -100,
+    max: 100,
+    step: 1,
+    defaultValue: NEUTRAL_TINT,
+    unit: '',
+  },
+  {
+    key: 'toneMapKnee',
+    label: 'Highlight roll-off',
+    // A single default cannot serve both an unedited photograph and a heavily
+    // graded one, which was measured rather than assumed: on a backlit frame a
+    // knee of 0.85 renders the sun gradient in 25 code values unedited against
+    // 20 at 0.75, and in *one* code value at +2 EV against two. Raising the knee
+    // improves an untouched image and flattens a pushed one, because it trades
+    // resolution below white for resolution above it and no fixed point on that
+    // trade is right for both.
+    //
+    // Bounds: below 0.3 pure white renders at code 218 or less, which reads as a
+    // washed-out image before any grade; above 0.95 there are three code values
+    // for everything the pipeline puts above white, which cannot represent a
+    // roll-off at all.
+    min: 0.3,
+    max: 0.95,
+    step: 0.01,
+    defaultValue: 0.85,
+    unit: '',
+  },
 ]
 
 /**
@@ -116,9 +192,133 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
  * checker verifies it covers every field. A test asserts the two agree, which is
  * two independent derivations of the same thing rather than one with a cast.
  */
+/**
+ * The tone curve's x axis is **ACEScct, from black to the encoding's top**, not
+ * `[0, 1]`.
+ *
+ * `encodeACEScct(0)` is 0.0729, not zero: the encoding has a linear toe that
+ * carries negative linear values, so the part of `[0, 1]` below that constant
+ * describes light that does not exist. Starting the domain at black is both more
+ * honest and the reason the remap in `curve.glsl` is exercised at all — with a
+ * `[0, 1]` domain the remap is the identity, and a shader that ignored the
+ * domain entirely would pass every test. That mutation was run and did pass
+ * before this change.
+ */
+export const TONE_CURVE_DOMAIN: readonly [number, number] = [encodeACEScct(0), 1]
+
 export const DEFAULT_EDIT_STATE: EditState = {
   exposure: 0,
   contrast: 1,
+  temperature: NEUTRAL_TEMPERATURE,
+  tint: NEUTRAL_TINT,
+  toneMapKnee: TONE_MAP_KNEE,
+  toneCurve: [TONE_CURVE_DOMAIN[0], TONE_CURVE_DOMAIN[0], 1, 1],
+}
+
+/**
+ * Keys whose value is an array of control points.
+ *
+ * Kept as a **separate table** from {@link EDIT_PARAMETERS} rather than adding a
+ * `type` discriminant to it. A discriminated table would mean every consumer —
+ * the interface, the validator, the merge — branching on the kind, which is the
+ * special-casing that a second table avoids: a slider table and a curve table
+ * each stay simple, and code that only cares about one iterates only that one.
+ *
+ * If a third kind arrives and the tables start needing to be walked together
+ * everywhere, that is the signal this should become a registry rather than a
+ * list, and it should be changed then rather than discriminated now.
+ */
+export type CurveEditKey = {
+  [K in keyof EditState]: EditState[K] extends number[] ? K : never
+}[keyof EditState]
+
+export interface CurveDescriptor {
+  readonly key: CurveEditKey
+  readonly label: string
+  /** The range control point x values must lie within. */
+  readonly domain: readonly [number, number]
+  readonly defaultValue: readonly number[]
+}
+
+export const CURVE_PARAMETERS: readonly CurveDescriptor[] = [
+  {
+    key: 'toneCurve',
+    label: 'Tone curve',
+    domain: TONE_CURVE_DOMAIN,
+    defaultValue: [TONE_CURVE_DOMAIN[0], TONE_CURVE_DOMAIN[0], 1, 1],
+  },
+]
+
+/**
+ * Bring a control point array into a usable state, or fall back to the default.
+ *
+ * Rejects rather than repairs anything structurally wrong — an odd length, fewer
+ * than two points, a non-finite value, x values that do not strictly increase —
+ * because a repaired curve is a different curve, and silently substituting one is
+ * worse than visibly falling back. Values *within* a valid structure are clamped,
+ * since that is a bound rather than a shape.
+ */
+export function sanitiseCurve(key: CurveEditKey, points: readonly number[]): number[] {
+  const descriptor = CURVE_PARAMETERS.find((c) => c.key === key)
+  if (!descriptor) throw new RangeError(`no descriptor for curve "${key}"`)
+  const fallback = [...descriptor.defaultValue]
+
+  // Checked through an `unknown` local rather than on `points` directly:
+  // `Array.isArray` narrows a `readonly T[]` to `any[]`, which would quietly
+  // switch off type checking for the rest of this function. The runtime check
+  // still earns its place — a preset loaded from disk reaches here as untrusted
+  // data whatever the signature says.
+  const candidate: unknown = points
+  if (!Array.isArray(candidate) || candidate.length < 4 || candidate.length % 2 !== 0) {
+    return fallback
+  }
+  const values: unknown[] = candidate
+  if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) return fallback
+  const numbers = values as number[]
+
+  const [lo, hi] = descriptor.domain
+  const out: number[] = []
+  let previousX = -Infinity
+  for (let i = 0; i < numbers.length; i += 2) {
+    const x = Math.min(hi, Math.max(lo, numbers[i] ?? Number.NaN))
+    const y = numbers[i + 1] ?? Number.NaN
+    // Clamping x could collapse two points onto each other, which the spline
+    // rejects; falling back is the honest response.
+    if (!(x > previousX)) return fallback
+    previousX = x
+    out.push(x, y)
+  }
+  return out
+}
+
+/** Split interleaved control points into the two arrays the spline works on. */
+export function splitControlPoints(points: readonly number[]): {
+  xs: number[]
+  ys: number[]
+} {
+  const xs: number[] = []
+  const ys: number[] = []
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    xs.push(points[i] ?? Number.NaN)
+    ys.push(points[i + 1] ?? Number.NaN)
+  }
+  return { xs, ys }
+}
+
+/**
+ * Whether a curve is its descriptor's identity, in which case its pass is
+ * skipped.
+ *
+ * Compared against the descriptor rather than against hardcoded endpoints, so
+ * the identity follows the domain instead of having to be remembered alongside
+ * it. A curve that is the identity by shape but carries extra control points is
+ * not detected, which costs a redundant pass and never a wrong image.
+ */
+export function isIdentityCurve(key: CurveEditKey, points: readonly number[]): boolean {
+  const descriptor = CURVE_PARAMETERS.find((c) => c.key === key)
+  if (!descriptor) return false
+  const identity = descriptor.defaultValue
+  return points.length === identity.length && points.every((v, i) => v === identity[i])
 }
 
 const DESCRIPTORS_BY_KEY = new Map<NumericEditKey, ParameterDescriptor>(
@@ -162,11 +362,16 @@ export function clampParameter(key: NumericEditKey, value: number): number {
  * field into a state that is then snapshotted into undo history.
  */
 export function mergeEditState(base: EditState, patch: Partial<EditState>): EditState {
-  const merged: Record<string, number> = {}
+  const merged: Record<string, number | number[]> = {}
   for (const descriptor of EDIT_PARAMETERS) {
     const incoming = patch[descriptor.key]
     merged[descriptor.key] =
       incoming === undefined ? base[descriptor.key] : clampParameter(descriptor.key, incoming)
+  }
+  for (const descriptor of CURVE_PARAMETERS) {
+    const incoming = patch[descriptor.key]
+    merged[descriptor.key] =
+      incoming === undefined ? [...base[descriptor.key]] : sanitiseCurve(descriptor.key, incoming)
   }
   return merged as unknown as EditState
 }
@@ -178,12 +383,31 @@ export function mergeEditState(base: EditState, patch: Partial<EditState>): Edit
  * rather than repeated at every call site with a computed key.
  */
 export function withParameter(state: EditState, key: NumericEditKey, value: number): EditState {
-  const next: Record<string, number> = { ...state }
+  const next: Record<string, unknown> = { ...state }
   next[key] = clampParameter(key, value)
+  return next as unknown as EditState
+}
+
+/** A copy of `state` with one curve replaced, validated. */
+export function withCurve(
+  state: EditState,
+  key: CurveEditKey,
+  points: readonly number[],
+): EditState {
+  const next: Record<string, unknown> = { ...state }
+  next[key] = sanitiseCurve(key, points)
   return next as unknown as EditState
 }
 
 /** Whether two states describe the same edit. Flat, so a key-wise compare is exact. */
 export function editStatesEqual(a: EditState, b: EditState): boolean {
-  return EDIT_PARAMETERS.every((descriptor) => a[descriptor.key] === b[descriptor.key])
+  if (!EDIT_PARAMETERS.every((descriptor) => a[descriptor.key] === b[descriptor.key])) return false
+  // By value, not by reference. Two states reached by different routes hold
+  // different arrays, and history compares snapshots to decide whether anything
+  // changed — a reference compare would record an entry for every drag frame.
+  return CURVE_PARAMETERS.every((descriptor) => {
+    const left = a[descriptor.key]
+    const right = b[descriptor.key]
+    return left.length === right.length && left.every((v, i) => v === right[i])
+  })
 }

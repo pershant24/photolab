@@ -54,7 +54,7 @@ interface RendererLike {
     render(input: unknown, context: unknown, options?: { finalTarget?: unknown }): void
   }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement; renderer?: string; capabilities: { renderer: string } }
-  input: { source: { kind: string }; edit: unknown; view: unknown }
+  input: { source: { kind: string }; edit: Record<string, unknown>; view: Record<string, unknown> }
   stop(): void
 }
 
@@ -132,7 +132,7 @@ test('frame time across proxy resolutions on a 12MP source', async ({ page }) =>
 
       const frame = (exposure: number): void => {
         renderer.graph.render(
-          { ...renderer.input, edit: { exposure, contrast: 1 } },
+          { ...renderer.input, edit: { ...renderer.input.edit, exposure, contrast: 1 } },
           context,
           { finalTarget: target },
         )

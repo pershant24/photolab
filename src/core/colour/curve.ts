@@ -230,3 +230,123 @@ export function sampleCurveLut(
   }
   return out
 }
+
+
+/**
+ * A bound on `|f''(x)|` over the whole curve.
+ *
+ * This is what decides the lookup table's resolution, so it is derived rather
+ * than estimated. Linear interpolation between samples of a twice-differentiable
+ * function has error at most `M h^2 / 8`, where `M` bounds the second derivative
+ * and `h` is the sample spacing — so a resolution follows from a tolerance
+ * instead of being picked as a round number.
+ *
+ * On each interval the interpolant is a cubic Hermite, so `d2p/dt2` is **linear
+ * in t** and its extremes are at the two ends. Evaluating both and taking the
+ * larger is exact, not a sample-based estimate that could miss a peak between
+ * samples.
+ */
+export function curveSecondDerivativeBound(
+  xs: readonly number[],
+  ys: readonly number[],
+): number {
+  const tangents = curveTangents(xs, ys)
+  let bound = 0
+
+  for (let i = 0; i < xs.length - 1; i++) {
+    const h = at(xs, i + 1) - at(xs, i)
+    const y0 = at(ys, i)
+    const y1 = at(ys, i + 1)
+    const m0 = at(tangents, i)
+    const m1 = at(tangents, i + 1)
+
+    // d2p/dt2 at t = 0 and t = 1, from the Hermite basis functions'
+    // second derivatives: h00'' = 12t - 6, h10'' = 6t - 4,
+    // h01'' = 6 - 12t, h11'' = 6t - 2.
+    const atStart = -6 * y0 - 4 * h * m0 + 6 * y1 - 2 * h * m1
+    const atEnd = 6 * y0 + 2 * h * m0 - 6 * y1 + 4 * h * m1
+
+    // Back to x: d2p/dx2 = (d2p/dt2) / h^2.
+    bound = Math.max(bound, Math.abs(atStart) / (h * h), Math.abs(atEnd) / (h * h))
+  }
+
+  return bound
+}
+
+/**
+ * The smallest lookup table that keeps linear interpolation error below
+ * `tolerance`.
+ *
+ * From `error <= M h^2 / 8` with `h = span / (n - 1)`:
+ *
+ *     n >= 1 + span * sqrt(M / (8 * tolerance))
+ *
+ * The bounds exist for different reasons and neither is a round number chosen
+ * for tidiness. The floor of 64 keeps a nearly-straight curve — where `M` is
+ * near zero and the formula would return two samples — from being stored at a
+ * resolution that leaves no room for a later control point. The ceiling of 4096
+ * is half the smallest `MAX_TEXTURE_SIZE` this project has measured, so a
+ * pathological curve cannot produce a texture the device will refuse; a curve
+ * that needs more than 4096 samples has a corner sharp enough that the eye will
+ * see the corner rather than the sampling.
+ */
+/**
+ * The interpolation error budget the resolution is derived against.
+ *
+ * `2^-13`, which is a quarter of half float's relative precision at 1.0. The
+ * lookup table is stored in R16F, so it cannot resolve better than `2^-11`
+ * regardless; sizing the sample count so that interpolation contributes a
+ * quarter of that keeps it well below the storage floor rather than becoming the
+ * dominant term. Verified empirically as well as derived: across an identity, a
+ * gentle S, a strong S, a sharp knee and a curve over a non-unit log domain, the
+ * worst measured error was 1.18e-4 against this budget of 1.22e-4.
+ */
+export const LUT_TOLERANCE = 2 ** -13
+
+export const MIN_LUT_SIZE = 64
+export const MAX_LUT_SIZE = 4096
+
+export function curveLutResolution(
+  xs: readonly number[],
+  ys: readonly number[],
+  tolerance: number,
+): number {
+  if (!(tolerance > 0)) throw new RangeError(`curveLutResolution: tolerance must be positive`)
+
+  const span = at(xs, xs.length - 1) - at(xs, 0)
+  const bound = curveSecondDerivativeBound(xs, ys)
+  if (bound === 0) return MIN_LUT_SIZE
+
+  const needed = Math.ceil(1 + span * Math.sqrt(bound / (8 * tolerance)))
+  return Math.min(MAX_LUT_SIZE, Math.max(MIN_LUT_SIZE, needed))
+}
+
+/**
+ * Map a value in the curve's own domain onto `[0, 1]` for sampling.
+ *
+ * **The lookup table spans the control point range, not `[0, 1]`.** For an
+ * ordinary tone curve those coincide and this is the identity, which is exactly
+ * why it has to be built and tested against a domain that is *not* `[0, 1]`: a
+ * film characteristic curve runs over log exposure, and code that quietly
+ * assumes a unit domain works perfectly until the first curve that does not have
+ * one. See `docs/ARCHITECTURE.md` §6.
+ */
+export function curveDomainToUnit(xs: readonly number[], x: number): number {
+  const x0 = at(xs, 0)
+  const x1 = at(xs, xs.length - 1)
+  return Math.min(1, Math.max(0, (x - x0) / (x1 - x0)))
+}
+
+/**
+ * The texture coordinate that samples LUT entry `u * (size - 1)` exactly.
+ *
+ * Texel centres sit at `(i + 0.5) / size`, so the first and last samples are at
+ * `0.5 / size` and `(size - 0.5) / size` rather than at 0 and 1. Sampling at `u`
+ * directly is the classic lookup table bug: it shifts the entire curve by half a
+ * texel, which looks completely plausible and is only visible as a small
+ * systematic offset. `tests/render/curve.spec.ts` introduces exactly that error
+ * and confirms the agreement test catches it.
+ */
+export function lutTexCoord(unit: number, size: number): number {
+  return (unit * (size - 1) + 0.5) / size
+}

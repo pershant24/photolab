@@ -18,9 +18,12 @@ import { RenderGraph } from './graph'
 import { testPatternPass } from './passes/testPattern'
 import { imageSourcePass } from './passes/imageSource'
 import { ingestPass } from './passes/ingest'
+import { whiteBalancePass } from './passes/whiteBalance'
 import { exposurePass } from './passes/exposure'
 import { contrastPass } from './passes/contrast'
+import { createCurvePass } from './passes/curve'
 import { displayPass } from './passes/display'
+import type { CurvePass } from './passes/curve'
 import type { PassContext, RenderInput, RenderSource, ViewState } from './passes/types'
 import { DEFAULT_VIEW_STATE } from './passes/types'
 import { uploadImageTexture } from './gl/texture'
@@ -68,6 +71,7 @@ export class Renderer {
   #edit: EditState = DEFAULT_EDIT_STATE
   #view: ViewState = DEFAULT_VIEW_STATE
   #source: RenderSource = { kind: 'pattern' }
+  #curvePass: CurvePass
   #interacting = false
   #renderCount = 0
   #frame: number | null = null
@@ -77,14 +81,17 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.#context = createRenderContext(canvas)
+    this.#curvePass = createCurvePass()
     this.#graph = new RenderGraph(this.#context, [
       // Registration order is not execution order; the graph sorts by stage.
       // Deliberately listed out of order here so that the ordering test is
       // asserting something rather than restating the array.
       displayPass,
+      this.#curvePass,
       contrastPass,
       testPatternPass,
       imageSourcePass,
+      whiteBalancePass,
       exposurePass,
       ingestPass,
     ])
@@ -103,6 +110,11 @@ export class Renderer {
     return this.#graph
   }
 
+  /** Exposed so a test can assert that a rebake happens per change, not per frame. */
+  get curveBakeCount(): number {
+    return this.#curvePass.bakeCount
+  }
+
   get context(): RenderContext {
     return this.#context
   }
@@ -119,13 +131,22 @@ export class Renderer {
    * here would render several times per frame during a drag and, because events
    * queue faster than the GPU drains, show the oldest result last.
    */
-  setEdit(next: EditState): void {
-    this.#edit = next
+  setEdit(next: Partial<EditState>): void {
+    // A patch, merged, rather than a replacement.
+    //
+    // The renderer holds the authoritative state and callers say what changed,
+    // which is what every caller wanted anyway. Taking a whole `EditState` was a
+    // standing trap at the boundary with browser tests, where the state arrives
+    // through `page.evaluate` and the type system cannot see it: a caller that
+    // named two parameters silently set every other one to undefined, and the
+    // shader received NaN. That is not a hypothetical — it happened for the view
+    // state and then again here.
+    this.#edit = { ...this.#edit, ...next }
     this.#dirty = true
   }
 
-  setView(next: ViewState): void {
-    this.#view = next
+  setView(next: Partial<ViewState>): void {
+    this.#view = { ...this.#view, ...next }
     this.#dirty = true
   }
 

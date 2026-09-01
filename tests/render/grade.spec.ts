@@ -50,7 +50,7 @@ interface RendererLike {
     ): void
   }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
-  input: { source: unknown; edit: unknown; view: unknown }
+  input: { source: unknown; edit: Record<string, unknown>; view: Record<string, unknown> }
   passContext(): unknown
   setEdit(next: { exposure: number; contrast: number }): void
   syncSize(available?: { width: number; height: number }): boolean
@@ -110,7 +110,9 @@ async function measureLegs(
       const finalTarget = renderer.graph.pool.acquire(canvas.width, canvas.height)
       try {
         renderer.graph.render(
-          { ...renderer.input, edit },
+          // Merged, not replaced: a partial edit would leave every parameter
+          // this test does not name undefined, and the shader would receive NaN.
+          { ...renderer.input, edit: { ...renderer.input.edit, ...edit } },
           renderer.passContext(),
           {
             finalTarget,
@@ -381,6 +383,8 @@ test.describe('purity: the path to a state does not change the pixels', () => {
       }
 
       const target = { exposure: 1.35, contrast: 1.4 }
+      // Compared field by field rather than by deep equality, so a parameter
+      // added later does not need this test edited.
 
       // Route one: set directly.
       store.getState().reset()
@@ -416,15 +420,20 @@ test.describe('purity: the path to a state does not change the pixels', () => {
         }
       }
 
+      const reached = store.getState().edit as Record<string, number>
       return {
         pixels: direct.length / 4,
         firstDifference,
-        edit: store.getState().edit,
-        target,
+        reachedTarget:
+          reached.exposure === target.exposure && reached.contrast === target.contrast,
+        edit: reached,
       }
     })
 
-    expect(frames.edit, 'both routes must reach the same EditState').toEqual(frames.target)
+    expect(
+      frames.reachedTarget,
+      `both routes must reach the same EditState; got ${JSON.stringify(frames.edit)}`,
+    ).toBe(true)
     expect(frames.pixels).toBeGreaterThan(1000)
     expect(
       frames.firstDifference,

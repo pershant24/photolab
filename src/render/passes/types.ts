@@ -3,7 +3,7 @@
  */
 
 import type { EditState } from '../../core/state/editState'
-import { GAMUT_COMPRESS_THRESHOLD, TONE_MAP_KNEE } from '../../core/colour/display'
+import { GAMUT_COMPRESS_THRESHOLD } from '../../core/colour/display'
 import type { RenderTarget } from '../gl/target'
 
 /**
@@ -83,10 +83,10 @@ export interface ViewState {
   readonly gamutCompress: boolean
 
   /**
-   * Their parameters, which are **runtime**. Tuning either is a uniform update,
-   * so a control on the knee could be dragged without compiling anything.
+   * A technical parameter rather than a creative one, so it stays here. The
+   * roll-off knee moved to `EditState`, because it is a choice about the
+   * photograph and belongs in undo and in presets.
    */
-  readonly toneMapKnee: number
   readonly gamutThreshold: number
 }
 
@@ -94,7 +94,6 @@ export const DEFAULT_VIEW_STATE: ViewState = {
   displayMode: 'sdr',
   toneMap: true,
   gamutCompress: true,
-  toneMapKnee: TONE_MAP_KNEE,
   gamutThreshold: GAMUT_COMPRESS_THRESHOLD,
 }
 
@@ -177,6 +176,15 @@ export interface Pass {
     input: RenderInput,
     context: PassContext,
   ): void
+
+  /**
+   * Release anything the pass owns on the GPU.
+   *
+   * Most passes own nothing and omit this. A pass that caches a texture between
+   * frames — the curve pass and its baked lookup table — must implement it, or
+   * the texture outlives the context it belongs to.
+   */
+  dispose?(): void
 }
 
 /** Where a pass writes: the canvas, or a pooled offscreen target. */

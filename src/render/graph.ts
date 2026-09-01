@@ -290,6 +290,7 @@ export class RenderGraph {
   }
 
   dispose(): void {
+    for (const pass of this.#passes) pass.dispose?.()
     this.#quad.dispose()
     this.#programs.dispose()
     this.#pool.disposeAll()

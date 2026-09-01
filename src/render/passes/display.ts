@@ -43,8 +43,10 @@ export const displayPass: Pass = {
   enabled: () => true,
 
   bindUniforms(gl, locate, input) {
+    // From the edit, not the view: the knee is a creative parameter carried by
+    // undo and presets, while the two switches above it are debug settings.
     const knee = locate('uToneMapKnee')
-    if (knee) gl.uniform1f(knee, input.view.toneMapKnee)
+    if (knee) gl.uniform1f(knee, input.edit.toneMapKnee)
 
     const threshold = locate('uGamutThreshold')
     if (threshold) gl.uniform1f(threshold, input.view.gamutThreshold)

@@ -37,7 +37,7 @@ interface RendererLike {
     render(input: unknown, context: unknown, options?: Record<string, unknown>): void
   }
   context: { gl: WebGL2RenderingContext; canvas: HTMLCanvasElement }
-  input: { source: unknown; edit: unknown; view: Record<string, unknown> }
+  input: { source: unknown; edit: Record<string, unknown>; view: Record<string, unknown> }
   passContext(): unknown
   syncSize(): boolean
   stop(): void
@@ -50,7 +50,7 @@ async function measure(
 ): Promise<{ acescg: number[][]; displayed: number[][] }> {
   return page.evaluate<
     { acescg: number[][]; displayed: number[][] },
-    { uvs: number[][]; decodeSrc: string; view: Record<string, unknown>; edit: unknown }
+    { uvs: number[][]; decodeSrc: string; view: Record<string, unknown>; edit: Record<string, number> }
   >(
     ({ uvs, decodeSrc, view, edit }) => {
       const decodeHalf = eval(decodeSrc) as (h: number) => number
@@ -84,7 +84,7 @@ async function measure(
       const finalTarget = renderer.graph.pool.acquire(canvas.width, canvas.height)
       try {
         renderer.graph.render(
-          { ...renderer.input, edit, view: { ...renderer.input.view, ...view } },
+          { ...renderer.input, edit: { ...renderer.input.edit, ...edit }, view: { ...renderer.input.view, ...view } },
           renderer.passContext(),
           {
             finalTarget,

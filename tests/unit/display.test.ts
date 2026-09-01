@@ -13,6 +13,7 @@ import {
 import { ACESCG_TO_SRGB, SRGB_TO_ACESCG } from '../../src/core/colour/matrices'
 import { MIDDLE_GREY_LINEAR } from '../../src/core/colour/grade'
 import { hueDifference, labHueAngle, linearSrgbToLab } from '../../src/core/colour/lab'
+import { whiteBalanceMatrix } from '../../src/core/colour/whiteBalance'
 import { srgbEotf, srgbOetf } from '../../src/core/colour/transfer'
 import { mat3MulVec3 } from '../../src/core/colour/types'
 import type { Vec3 } from '../../src/core/colour/types'
@@ -214,10 +215,21 @@ describe('gamut compression', () => {
       if (compressedShift > clippedShift) {
         worse.push(`${original.join(', ')}: compressed ${compressedShift.toFixed(1)}deg vs clipped ${clippedShift.toFixed(1)}deg`)
       }
-      // No single colour may move further than this. Deep blues are the ones to
-      // watch: RGB-ratio hue and perceptual hue diverge most there, which is the
-      // "blue goes purple" failure, and it is where the compressor will work
-      // hardest once white balance and film curves land.
+      // No single colour may move further than this.
+      //
+      // **Do not tighten this without looking at green.** The bound is loose for
+      // red and blue — 3.0 and 1.5 degrees measured — and nearly touches on
+      // saturated green at 17.1. That is not the compressor performing worse
+      // there; it is the metric. AP1 green sits far outside sRGB, and CIELAB is
+      // at its least perceptually uniform in exactly that region, so a fixed
+      // angular bound covers red and blue comfortably and green barely. Someone
+      // reading only the red and blue figures will conclude there is slack here
+      // and break green.
+      //
+      // Deep blues are the other case to watch, for the opposite reason: RGB
+      // ratio hue and perceptual hue diverge most there, which is the "blue goes
+      // purple" failure, and it is where the compressor will work hardest once
+      // white balance and film curves land.
       expect(compressedShift, `hue shift on ${original.join(', ')}`).toBeLessThan(20)
     }
 
@@ -236,6 +248,73 @@ describe('gamut compression', () => {
       const out = gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)
       expect(Math.max(out[0], out[1], out[2])).toBeCloseTo(peak, 12)
     }
+  })
+
+  it('holds the hue bound with white balance active at its extremes', () => {
+    // White balance is the first pass that pushes colours out of gamut in normal
+    // use, so the bound established on hand-picked colours has to survive real
+    // ones. Saturated patches are adapted at both ends of the temperature range
+    // and both ends of tint, converted to display primaries, and put through the
+    // compressor.
+    //
+    // Skies are the case to watch and are included deliberately: they are the
+    // most saturated blues a photograph normally contains, and blue is where RGB
+    // ratio hue and perceptual hue diverge most.
+    const hueOf = (rgb: Vec3): number => labHueAngle(linearSrgbToLab(rgb))
+
+    // Saturated ACEScg colours a graded photograph produces, including two skies.
+    const working: Vec3[] = [
+      [0.05, 0.18, 0.75],
+      [0.02, 0.28, 0.9],
+      [0.9, 0.12, 0.05],
+      [0.75, 0.6, 0.05],
+      [0.06, 0.7, 0.2],
+      [0.5, 0.05, 0.6],
+    ]
+    const settings: [number, number][] = [
+      [2000, 0],
+      [2500, -100],
+      [12000, 0],
+      [12000, 100],
+      [3200, 60],
+    ]
+
+    let worst = 0
+    let worstDescription = ''
+    let compressedTotal = 0
+    let clippedTotal = 0
+    let outOfGamutCases = 0
+
+    for (const [temperature, tint] of settings) {
+      const balance = whiteBalanceMatrix(temperature, tint)
+      for (const colour of working) {
+        const balanced = mat3MulVec3(balance, colour)
+        const linear = mat3MulVec3(ACESCG_TO_SRGB, balanced)
+        if (linear.every((v) => v >= 0)) continue
+        outOfGamutCases++
+
+        const clipped: Vec3 = [
+          Math.max(0, linear[0]),
+          Math.max(0, linear[1]),
+          Math.max(0, linear[2]),
+        ]
+        const compressed = gamutCompressRgb(linear, GAMUT_COMPRESS_THRESHOLD)
+        const target = hueOf(linear)
+        const shift = hueDifference(hueOf(compressed), target)
+
+        compressedTotal += shift
+        clippedTotal += hueDifference(hueOf(clipped), target)
+        if (shift > worst) {
+          worst = shift
+          worstDescription = `${temperature}K tint ${tint} on ${colour.join(', ')}`
+        }
+      }
+    }
+
+    // The comparison has to be measuring something.
+    expect(outOfGamutCases, 'white balance must push colours out of gamut').toBeGreaterThan(5)
+    expect(worst, `worst hue shift was ${worst.toFixed(1)}deg at ${worstDescription}`).toBeLessThan(20)
+    expect(compressedTotal).toBeLessThan(clippedTotal)
   })
 
   it('meets its own identity section smoothly at the threshold', () => {

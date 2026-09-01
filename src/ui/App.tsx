@@ -2,6 +2,7 @@ import { useStore } from 'zustand'
 
 import { EDIT_PARAMETERS } from '../core/state/editState'
 import { editorStore } from '../core/state/editorStore'
+import { CurveEditor } from './CurveEditor'
 import { ParameterSlider } from './ParameterSlider'
 import { Viewport } from './Viewport'
 
@@ -38,12 +39,15 @@ function Adjustments() {
 
   return (
     <aside
-      className="flex w-72 shrink-0 flex-col border-l border-hairline bg-surface-raised"
+      className="flex w-80 shrink-0 flex-col border-l border-hairline bg-surface-raised"
       aria-label="Adjustments"
     >
-      {EDIT_PARAMETERS.map((descriptor) => (
-        <ParameterSlider key={descriptor.key} descriptor={descriptor} />
-      ))}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {EDIT_PARAMETERS.map((descriptor) => (
+          <ParameterSlider key={descriptor.key} descriptor={descriptor} />
+        ))}
+        <CurveEditor />
+      </div>
 
       <div className="mt-auto flex gap-2 border-t border-hairline px-4 py-3 text-xs">
         <button

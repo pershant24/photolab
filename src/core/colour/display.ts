@@ -90,6 +90,32 @@ import { mat3MulVec3 } from './types'
  *
  * The knee *is* the white point parameter, seen from the other end.
  *
+ * The symmetry is **exact in linear light and only approximate in code values**.
+ * The budget of `(1 - knee)/2` either side of `f(1.0)` is exact as a linear
+ * quantity; the code figures above are that budget seen through the sRGB encode,
+ * which is monotone over the interval but not linear, so the two columns match
+ * closely rather than identically.
+ *
+ * # Measured: no single default serves both an unedited and a graded image
+ *
+ * Distinct code values along a gradient through a backlit frame's sun, and down
+ * its sky:
+ *
+ *   knee 0.75, unedited   sun 20 levels, sky 45      +2 EV   sun 2, sky 3
+ *   knee 0.85, unedited   sun 25 levels, sky 51      +2 EV   sun 1, sky 2
+ *
+ * Raising the knee **improves** an untouched photograph, because more of it sits
+ * below the knee at full resolution, and **flattens** a pushed one, because
+ * everything above white has fewer code values to occupy. At +2 EV and a knee of
+ * 0.85 the sun collapses to a single code value: not banded, gone.
+ *
+ * No fixed point on that trade is right for both, which is why this is a user
+ * parameter in `EditState` rather than a constant. The largest step between
+ * adjacent pixels stayed at one or two code values throughout, so the failure
+ * mode is flattening rather than banding; if banding does appear once the film
+ * stage generates genuinely wide-range values, ordered dither at the encode step
+ * is the candidate mitigation.
+ *
  * The earlier default of 0.75 was picked against a mean shift across the whole
  * image, which was the wrong statistic: every pixel below the knee is unchanged
  * by construction, so averaging over them understates the effect at the only

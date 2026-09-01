@@ -95,6 +95,39 @@ reaches the lens before the film, halation still precedes the curves, grain stil
 follows them — but the curve's parameters are fitted to how it looks rather than
 derived from a datasheet.
 
+### It moves the film stage toward the look system, and that is the cost
+
+The first conversation chose **the response model over the look system**. This
+decision moves the film stage substantially back toward the look system, and
+that should be a stated position rather than something discovered at Stage 7.
+
+A characteristic curve applied to display-referred data is a hand-tuned shape
+*derived from* a physical model rather than the model itself. The physics still
+sets the shape — a toe, a shoulder, three channels crossing over — but the
+numbers that place them are fitted by eye, because the domain they were specified
+against is not the domain they receive. Given the RAW exclusion this may be the
+only honest option; it is not a free one.
+
+### What this changes about the datasheet work
+
+Concretely, because it changes what is worth doing:
+
+- **Absolute density calibration loses most of its value.** Published
+  characteristic curves are defined against scene log exposure. Fed
+  display-referred data they will not reproduce published behaviour, so matching
+  them numerically buys nothing that survives the eye-tuning that has to happen
+  anyway.
+- **Per-channel *relative* differences keep their value.** The domain warp
+  between scene-referred and display-referred applies equally to all three
+  channels, so the **vertical separation** between the R, G and B curves survives
+  in character even as their positions shift. That separation is the crossover —
+  shadows drifting one way, highlights the other — which a single RGB curve
+  cannot produce and which is the actual source of a stock's identity.
+
+**So digitise for the shape of the differences between channels, not for
+absolute density.** A stock captured as three curves whose separation is right
+and whose absolute placement is wrong is usable; the reverse is not.
+
 **Revisit if RAW support is ever added.** At that point ingest would produce
 genuinely scene-referred data, the film stage would want that domain, and the
 OOTF question becomes real and answerable rather than a guess.
@@ -262,6 +295,36 @@ port of the spline.
 The LUT's texture coordinate spans the **control point range**, not `[0, 1]`. For
 an ordinary tone curve those coincide; for a film characteristic curve over a log
 exposure axis they do not, and the input must be remapped before sampling.
+
+The tone curve's own domain deliberately starts at `encodeACEScct(0)` = 0.0729
+rather than at zero, for two reasons. It is more honest — everything below that
+describes negative light — and it means the remap is **exercised** rather than
+merely documented. With a `[0, 1]` domain the remap is the identity, and a
+shader ignoring the domain entirely passes every test; that mutation was run
+against a unit domain and did pass.
+
+### Resolution, format and filtering
+
+- **Resolution is derived, not chosen.** Linear interpolation between samples of
+  a function has error at most `M h² / 8`, where `M` bounds the second
+  derivative, so `n ≥ 1 + span · √(M / 8ε)`. `M` is computed exactly from the
+  Hermite basis rather than estimated by sampling, because a sampled estimate can
+  miss a peak between samples and silently under-size every table. A gentle S
+  needs 78 samples; a sharp knee needs 1237.
+- **The budget `ε` is `2⁻¹³`**, a quarter of half float's relative precision, so
+  that interpolation stays well below the storage floor rather than becoming the
+  dominant error. Measured worst error across five curves: 1.18e-4 against a
+  budget of 1.22e-4.
+- **RGBA16F with LINEAR filtering and CLAMP_TO_EDGE.** Half float because a
+  curve's output is not confined to `[0, 1]`. Four channels rather than one
+  because R16F produced a constant sample in the shader with **no GL error
+  reported at any step**, so the single-channel path is not something this
+  renderer can rely on across drivers. Clamping rather than wrapping, or an input
+  past the end of the curve becomes a value from the other end of it.
+- **Texel centres, not `[0, 1]`.** Sample `i` sits at `(i + 0.5) / n`, so the
+  coordinate is `(u(n − 1) + 0.5) / n`. Sampling at `u` directly is the classic
+  lookup table bug: it shifts the whole curve by half a sample and looks entirely
+  plausible.
 
 ---
 

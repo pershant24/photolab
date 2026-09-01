@@ -54,7 +54,7 @@ describe('a drag is one history entry', () => {
   })
 
   it('returns to the state before the drag, not to a frame inside it', () => {
-    const s = store({ exposure: -1, contrast: 1 })
+    const s = store({ ...DEFAULT_EDIT_STATE, exposure: -1, contrast: 1 })
     drag(s, [0, 0.5, 1, 1.5, 2])
     s.getState().undo()
     expect(s.getState().edit.exposure).toBe(-1)
@@ -70,7 +70,7 @@ describe('a drag is one history entry', () => {
   })
 
   it('records nothing for a drag that ends where it began', () => {
-    const s = store({ exposure: 1, contrast: 1 })
+    const s = store({ ...DEFAULT_EDIT_STATE, exposure: 1, contrast: 1 })
     drag(s, [2, 3, 2, 1])
     expect(s.getState().past).toEqual([])
     expect(s.getState().edit.exposure).toBe(1)
@@ -86,7 +86,7 @@ describe('a drag is one history entry', () => {
 
   it('treats a second begin as part of the same gesture', () => {
     // Overwriting the baseline would make undo return to the middle of a drag.
-    const s = store({ exposure: 0, contrast: 1 })
+    const s = store({ ...DEFAULT_EDIT_STATE, exposure: 0, contrast: 1 })
     s.getState().beginInteraction()
     s.getState().setParameter('exposure', 1)
     s.getState().beginInteraction()
@@ -231,8 +231,8 @@ describe('reset and presets', () => {
 
   it('applies a partial patch as one entry', () => {
     const s = store()
-    s.getState().applyPatch({ exposure: 1.5, contrast: 1.2 })
-    expect(s.getState().edit).toEqual({ exposure: 1.5, contrast: 1.2 })
+    s.getState().applyPatch({ ...DEFAULT_EDIT_STATE, exposure: 1.5, contrast: 1.2 })
+    expect(s.getState().edit).toEqual({ ...DEFAULT_EDIT_STATE, exposure: 1.5, contrast: 1.2 })
     expect(s.getState().past).toHaveLength(1)
   })
 })
@@ -242,7 +242,7 @@ describe('the path taken to a state does not change the state', () => {
   // pure function of EditState, so if two paths reach the same EditState they
   // must render identically. The renderer-level half of this arrives with the
   // exposure and contrast passes, which have nothing to act on yet.
-  const target: EditState = { exposure: 1.75, contrast: 1.4 }
+  const target: EditState = { ...DEFAULT_EDIT_STATE, exposure: 1.75, contrast: 1.4 }
 
   const paths: readonly [string, (s: EditorStore) => void][] = [
     [

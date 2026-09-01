@@ -302,6 +302,30 @@ and most of the separation survives.
   approximately; saturated patches desaturate slightly without turning plastic.
 - **Shadows are still crushed**, unchanged and for the reason above.
 
+## Two parameter tables, not one with a discriminant
+
+`EditState` now holds two kinds of parameter: scalars with sliders, and curves
+with control point arrays. They live in **two separate tables**,
+`EDIT_PARAMETERS` and `CURVE_PARAMETERS`, rather than one table with a `type`
+field.
+
+The reason is that a discriminated table pushes the branch into every consumer —
+the interface, the validator, the preset merge, the equality check — where two
+tables let each of those iterate only the kind it cares about. The coverage test
+asserts that every field in `DEFAULT_EDIT_STATE` appears in the union of both, so
+a third kind cannot be added without a table, which is where a field with no
+interface and no validation would otherwise come from.
+
+**If a third kind arrives and the tables start needing to be walked together
+everywhere, that is the signal this should become a registry rather than a list.**
+It should be changed then, not discriminated now.
+
+That coverage test has already earned itself: when the tone curve's domain moved
+to start at black in ACEScct, `DEFAULT_EDIT_STATE` kept its control points at
+zero. The two disagreed, so the identity check never matched and the curve pass
+ran on every unedited photograph — a full extra pass, and a slightly altered
+image, from a two-element mismatch.
+
 ## Golden images and the SwiftShader backend
 
 Golden tests run on SwiftShader, forced via `--use-gl=angle
