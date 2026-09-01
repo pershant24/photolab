@@ -25,8 +25,10 @@ import type { CurveLut } from '../gl/lut'
 import { createCurveLut } from '../gl/lut'
 import type { Pass, RenderInput } from './types'
 
-/** The unit a curve texture is bound to. 0 is `uSource`, 1 is the image. */
-const CURVE_LUT_UNIT = 2
+import { CURVE_LUT_UNITS } from '../gl/textureUnits'
+
+/** The grade's single tone curve uses the first of the curve units. */
+const CURVE_LUT_UNIT = CURVE_LUT_UNITS[0]
 
 export interface CurvePass extends Pass {
   /** Bakes performed. Asserted against, so a rebake per frame is a test failure. */
@@ -71,24 +73,17 @@ export function createCurvePass(): CurvePass {
     enabled: (input: RenderInput) => !isIdentityCurve('toneCurve', input.edit.toneCurve),
 
     bindUniforms(gl, locate, input) {
-      // Switch to this pass's own texture unit BEFORE baking, not after.
-      //
-      // Creating a texture binds it, and `createCurveLut` unbinds when it is
-      // done — both on whichever unit is currently active. The graph has already
-      // bound `uSource` on unit 0 by this point, so baking while unit 0 is
-      // active wipes that binding and the pass samples a black source. It cost
-      // an hour: the symptom was a constant output, and the constant turned out
-      // to be the curve evaluated at zero rather than anything wrong with the
-      // lookup table itself.
-      gl.activeTexture(gl.TEXTURE0 + CURVE_LUT_UNIT)
+      // No unit juggling here: baking happens on the reserved scratch unit
+      // inside `createCurveLut`, which is what stops it disturbing `uSource`.
       const baked = ensureLut(gl, input.edit.toneCurve)
 
       const sampler = locate('uCurveLut')
       if (sampler) {
+        gl.activeTexture(gl.TEXTURE0 + CURVE_LUT_UNIT)
         gl.bindTexture(gl.TEXTURE_2D, baked.texture)
         gl.uniform1i(sampler, CURVE_LUT_UNIT)
+        gl.activeTexture(gl.TEXTURE0)
       }
-      gl.activeTexture(gl.TEXTURE0)
 
       const domain = locate('uCurveDomain')
       if (domain) gl.uniform2f(domain, baked.domain[0], baked.domain[1])

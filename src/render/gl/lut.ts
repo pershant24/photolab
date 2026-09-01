@@ -27,6 +27,8 @@
  * `REPEAT` would do, and it would turn a highlight into a shadow.
  */
 
+import { onScratchUnit } from './textureUnits'
+
 /** A curve baked to the GPU, with the shape the shader needs to sample it. */
 export interface CurveLut {
   readonly texture: WebGLTexture
@@ -45,6 +47,17 @@ export function createCurveLut(
   const size = samples.length
   if (size < 2) throw new RangeError(`createCurveLut: need at least 2 samples, got ${size}`)
 
+  // On the scratch unit, so the bind and unbind below cannot disturb a sampler
+  // binding a pass is relying on. See textureUnits.ts.
+  return onScratchUnit(gl, () => buildLut(gl, samples, size, domain))
+}
+
+function buildLut(
+  gl: WebGL2RenderingContext,
+  samples: Float32Array,
+  size: number,
+  domain: readonly [number, number],
+): CurveLut {
   const texture = gl.createTexture()
   if (!texture) throw new Error('createCurveLut: gl.createTexture() returned null')
 

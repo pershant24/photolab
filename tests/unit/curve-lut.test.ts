@@ -12,6 +12,13 @@ import {
   sampleCurveLut,
 } from '../../src/core/colour/curve'
 
+/**
+ * A characteristic curve with a sharp toe and a shoulder, over the tone curve's
+ * ACEScct domain. Sharper than anything a person places by hand on a tone curve.
+ */
+const FILM_TOE_XS = [0.0729, 0.11, 0.16, 0.45, 0.72, 0.9, 1]
+const FILM_TOE_YS = [0.0729, 0.075, 0.1, 0.44, 0.79, 0.92, 0.945]
+
 /** A curve over log exposure: the case a unit-domain assumption breaks on. */
 const LOG_DOMAIN_XS = [-4, -2, 0, 2, 4]
 const LOG_DOMAIN_YS = [0.02, 0.15, 0.5, 0.9, 1.0]
@@ -62,6 +69,11 @@ describe('LUT resolution, derived from the curve', () => {
       ['strong S', [0, 0.2, 0.5, 0.8, 1], [0, 0.05, 0.5, 0.95, 1]],
       ['sharp knee', [0, 0.9, 0.95, 1], [0, 0.2, 0.9, 1]],
       ['log domain', LOG_DOMAIN_XS, LOG_DOMAIN_YS],
+      // The case this machinery exists for. A film characteristic curve's toe is
+      // sharper than any tone curve a person would place by hand, so a
+      // resolution adequate for the second is not automatically adequate for the
+      // first — which is exactly why it is derived per curve at bake time.
+      ['film curve, sharp toe', FILM_TOE_XS, FILM_TOE_YS],
     ]
 
     for (const [name, xs, ys] of cases) {
@@ -86,6 +98,25 @@ describe('LUT resolution, derived from the curve', () => {
     const gentle = curveLutResolution([0, 0.5, 1], [0, 0.52, 1], LUT_TOLERANCE)
     const sharp = curveLutResolution([0, 0.9, 0.95, 1], [0, 0.2, 0.9, 1], LUT_TOLERANCE)
     expect(sharp).toBeGreaterThan(gentle * 5)
+  })
+
+  it('gives a film curve more samples than a tone curve of the same span', () => {
+    // The property the film stage depends on. Measured: a gentle tone curve
+    // takes 70 samples, a strong one 124, and a characteristic curve with a
+    // sharp toe 154 — over an identical domain. A fixed count tuned on the first
+    // would under-resolve the third, and the toe is precisely where a
+    // characteristic curve carries its character.
+    const gentleTone = curveLutResolution(
+      [0.0729, 0.3, 0.55, 0.8, 1],
+      [0.0729, 0.24, 0.55, 0.85, 1],
+      LUT_TOLERANCE,
+    )
+    const filmToe = curveLutResolution(FILM_TOE_XS, FILM_TOE_YS, LUT_TOLERANCE)
+
+    expect(filmToe).toBeGreaterThan(gentleTone)
+    expect(curveSecondDerivativeBound(FILM_TOE_XS, FILM_TOE_YS)).toBeGreaterThan(
+      curveSecondDerivativeBound([0.0729, 0.3, 0.55, 0.8, 1], [0.0729, 0.24, 0.55, 0.85, 1]),
+    )
   })
 
   it('returns the floor for a straight line, which needs no samples at all', () => {

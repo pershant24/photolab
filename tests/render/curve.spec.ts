@@ -193,6 +193,49 @@ test.describe('tone curve', () => {
     expect(failures.slice(0, 10).join('\n')).toBe('')
   })
 
+  test('a bake does not disturb the source binding', async ({ page }) => {
+    // Regression test for a bug that was found by instrumenting the shader
+    // rather than by a test, which is the worse way to find things.
+    //
+    // Creating a texture binds it, and `gl.bindTexture` binds to whichever unit
+    // is active. Baking a lookup table while unit 0 was current wiped the
+    // `uSource` binding the graph had just made, and the pass sampled a black
+    // source — a constant output whose constant was the curve evaluated at zero.
+    //
+    // The fix is a reserved scratch unit that no shader samples, so the film
+    // stage's three tables per stock cannot bring it back. The assertion is not
+    // about texture units, though: it is that a *freshly baked* curve produces
+    // the same result as an already-baked one, which is what the bug broke.
+    const points = CONTROL_POINTS
+    const nudged = [...points]
+    nudged[3] = (nudged[3] ?? 0) + 1e-7
+
+    // The first render bakes; the second reuses. If the bake disturbs the
+    // source, only the first is wrong, and they disagree.
+    const freshlyBaked = await measure(page, nudged)
+    const alreadyBaked = await measure(page, nudged)
+
+    const failures: string[] = []
+    for (let i = 0; i < PATCH_COUNT; i++) {
+      const first = freshlyBaked.after[i]
+      const second = alreadyBaked.after[i]
+      if (!first || !second) continue
+      for (let c = 0; c < 3; c++) {
+        if (first[c] !== second[c]) {
+          failures.push(
+            `patch ${i} channel ${'rgb'[c] ?? '?'}: fresh bake ${first[c]}, cached ${second[c]}`,
+          )
+        }
+      }
+    }
+    expect(failures.slice(0, 6).join('\n')).toBe('')
+
+    // And the source really was non-trivial, so the comparison means something:
+    // a black source would make both renders agree on the same wrong answer.
+    const inputs = freshlyBaked.before.flat().filter((v) => v > 0.01)
+    expect(inputs.length, 'the pass must have had a real image to work on').toBeGreaterThan(10)
+  })
+
   test('rebakes once per control point change, never per frame', async ({ page }) => {
     // The constraint that makes the whole exception affordable. A rebake per
     // frame would put a variable-length loop over control points, and a throwing

@@ -3,6 +3,7 @@
  */
 
 import type { RenderCapabilities } from './context'
+import { onScratchUnit } from './textureUnits'
 
 export class SourceTooLargeError extends Error {
   override readonly name = 'SourceTooLargeError'
@@ -44,18 +45,24 @@ export function uploadImageTexture(
     )
   }
 
-  const texture = gl.createTexture()
-  if (!texture) throw new Error('uploadImageTexture: gl.createTexture() returned null')
+  // On the scratch unit: uploading binds, and binding on a sampled unit would
+  // silently replace whatever a pass was about to read. See textureUnits.ts.
+  return onScratchUnit(gl, () => {
+    const texture = gl.createTexture()
+    if (!texture) throw new Error('uploadImageTexture: gl.createTexture() returned null')
 
-  gl.bindTexture(gl.TEXTURE_2D, texture)
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, bitmap.width, bitmap.height)
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, bitmap.width, bitmap.height, gl.RGBA, gl.UNSIGNED_BYTE, bitmap)
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, bitmap.width, bitmap.height)
+    gl.texSubImage2D(
+      gl.TEXTURE_2D, 0, 0, 0, bitmap.width, bitmap.height, gl.RGBA, gl.UNSIGNED_BYTE, bitmap,
+    )
 
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-  gl.bindTexture(gl.TEXTURE_2D, null)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.bindTexture(gl.TEXTURE_2D, null)
 
-  return texture
+    return texture
+  })
 }

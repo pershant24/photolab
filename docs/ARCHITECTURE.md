@@ -305,12 +305,25 @@ against a unit domain and did pass.
 
 ### Resolution, format and filtering
 
-- **Resolution is derived, not chosen.** Linear interpolation between samples of
-  a function has error at most `M h² / 8`, where `M` bounds the second
-  derivative, so `n ≥ 1 + span · √(M / 8ε)`. `M` is computed exactly from the
-  Hermite basis rather than estimated by sampling, because a sampled estimate can
-  miss a peak between samples and silently under-size every table. A gentle S
-  needs 78 samples; a sharp knee needs 1237.
+- **Resolution is derived per curve at bake time, not chosen.** Linear
+  interpolation between samples of a function has error at most `M h² / 8`, where
+  `M` bounds the second derivative, so `n ≥ 1 + span · √(M / 8ε)`. `M` is computed
+  exactly from the Hermite basis rather than estimated by sampling, because a
+  sampled estimate can miss a peak between samples and silently under-size every
+  table. Measured over the tone curve's domain:
+
+  | Curve | max &#124;f''&#124; | Samples |
+  |---|---|---|
+  | Identity | 0 | 64 (the floor) |
+  | Gentle S | 5.3 | 70 |
+  | Strong S | 17.1 | 124 |
+  | Film curve, soft toe | 10.6 | 98 |
+  | Film curve, sharp toe | 26.6 | 154 |
+  | Pathological knee | 1491 | 1237 |
+
+  The film case is why this is per-curve. A count tuned on a tone curve
+  under-resolves a characteristic curve's toe, which is precisely where the
+  curve carries its character.
 - **The budget `ε` is `2⁻¹³`**, a quarter of half float's relative precision, so
   that interpolation stays well below the storage floor rather than becoming the
   dominant error. Measured worst error across five curves: 1.18e-4 against a

@@ -132,9 +132,29 @@ import { mat3MulVec3 } from './types'
  * characteristic curve has a shoulder of its own, which reduces what the display
  * roll-off has to do; halation adds light, which increases it.
  *
- * **It must not adapt to the image's measured maximum.** A tile does not know
- * the global maximum, so preview and export would disagree and the renderer
+ * # Two kinds of adaptivity, and only one of them is safe
+ *
+ * **Adaptivity derived from `EditState` is purity-safe.** `EditState` is
+ * identical for preview and for every export tile, so anything computed from it
+ * alone gives the same answer everywhere. An automatic knee is derivable this
+ * way: exposure stops and contrast slope together bound the largest value that
+ * can reach the display transform, so a knee could be chosen to fit that bound
+ * without measuring a single pixel.
+ *
+ * **Adaptivity derived from image content is not.** A tile does not know the
+ * frame's global maximum, so a knee fitted to measured content would differ
+ * between preview and export and between one tile and the next, and the renderer
  * would stop being a pure function of its inputs.
+ *
+ * The distinction matters because the earlier rule stated only the second half,
+ * and read as a prohibition on adaptivity in general. It is not.
+ *
+ * The automatic knee is **not implemented**, and the reason is a judgement rather
+ * than a constraint: a knee that moves while exposure is being dragged couples
+ * two controls, and the highlights would shift for reasons the person dragging
+ * did not ask for. Whether that feels like help or like the image getting away
+ * from you is a question to answer with a photograph in front of you, not in a
+ * comment.
  */
 export const TONE_MAP_KNEE = 0.85
 
