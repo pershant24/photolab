@@ -4,6 +4,7 @@ import { PARAMETERS } from '../core/state/editState'
 import { editorStore } from '../core/state/editorStore'
 import { ParameterControl } from './controls/registry'
 import { FilmStocks } from './FilmStocks'
+import { Presets } from './Presets'
 import { Viewport } from './Viewport'
 
 /**
@@ -53,7 +54,8 @@ function Adjustments() {
           <ParameterControl key={descriptor.key} descriptor={descriptor} />
         ))}
 
-        {/* Not a parameter: a preset picker that writes several of them. */}
+        {/* Not parameters: pickers that write several of them at once. */}
+        <Presets />
         <FilmStocks />
       </div>
 

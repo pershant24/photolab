@@ -929,3 +929,54 @@ correlate with how far outside the gamut the colour is.
 hand-picked strongly out-of-gamut colours. That test still passes and is not
 weakened. The invariant simply does not generalise to this region, and the fix is
 a decision about the compressor rather than about HSL.
+
+## Presets
+
+Nearly free, because `EditState` was built to make it so: flat, serialisable, and
+merged through a loop over the parameter table rather than over the incoming
+patch. Two of the four requirements were already satisfied before any code was
+written, and were verified rather than built:
+
+- **Unknown keys are dropped on merge.** This holds by the *direction* of the
+  loop in `mergeEditState`, not by a filter, so it survives every new parameter
+  kind. Already asserted in `edit-state.test.ts`.
+- **Applying a preset is one undo step.** `applyPatch` calls `commit` once.
+  Asserted end to end now: a preset touching seven parameters costs exactly one
+  history entry and one undo restores every one of them.
+
+### Sparse, not complete — and what that costs
+
+A preset stores **only what differs from the default**. The alternative resets
+exposure and white balance on every application, and those are decisions about
+*this photograph* — how much light there was, what colour it was — rather than
+about the look. Wiping them is the opposite of a starting point.
+
+The cost is real and worth stating, since the choice is a trade rather than an
+obvious win: **a sparse preset is not a complete description of a look.** Applied
+to two different edits it gives two different pictures, so "the same preset" does
+not mean "the same result". Exact reproduction has a route — reset, then apply —
+and that route works *because* what is stored is a difference from a known state.
+A complete-state preset would have made the common case wrong in order to make
+the rare case automatic.
+
+One consequence caught by a test rather than by thinking: a preset entry equal to
+the default carries nothing and is dropped on the way in, so a shipped preset
+listing one would disagree with what loading it produces. Three of the four
+shipped presets had such an entry, and the assertion that a shipped preset needs
+no clamping and loses no keys is what found them.
+
+### Storage fails softly
+
+Every `presetStore` operation resolves rather than throwing when IndexedDB is
+unavailable — absent in a private window in some browsers, blocked by policy in
+others. A photo editor that will not open because it cannot save a preset is
+worse than one whose presets do not persist. The failure reaches the interface as
+a message, and the preset still applies for the session.
+
+Stored patches are re-validated on the way **out**, not only on the way in. A
+stored preset is as untrusted as an imported one: it may have been written by an
+older build, or a newer one through a shared origin, and the parameter table it
+was written against is not necessarily this one.
+
+An import drops a bad field rather than failing: one bad entry should cost that
+entry, and the caller is told what went. Only an unrecognisable envelope is fatal.
