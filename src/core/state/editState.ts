@@ -1,6 +1,14 @@
 import { encodeACEScct } from '../colour/transfer'
 import { WHEEL_RANGE } from '../colour/wheels'
 import {
+  HSL_BANDS,
+  HSL_BAND_COUNT,
+  HSL_HUE_RANGE,
+  HSL_LUMINANCE_RANGE,
+  HSL_SATURATION_RANGE,
+} from '../colour/hsl'
+import { SPLIT_BALANCE_MAX, SPLIT_BALANCE_MIN, SPLIT_TINT_RANGE } from '../colour/splitTone'
+import {
   defaultParameter,
   parameterIsIdentity,
   parametersEqual,
@@ -131,6 +139,24 @@ export interface EditState {
   readonly lift: readonly number[]
   readonly gamma: readonly number[]
   readonly gain: readonly number[]
+
+  /** Six hue bands each, red through magenta. Neutral is zero throughout. */
+  readonly hslHue: readonly number[]
+  readonly hslSaturation: readonly number[]
+  readonly hslLuminance: readonly number[]
+
+  /**
+   * Split toning: a tint for the shadows, a tint for the highlights, and the
+   * position of the handover.
+   *
+   * The balance is in **stops from middle grey**, not as a position in the
+   * encoded domain. That is the third parameter in this project to face the
+   * choice and the first two got it wrong in the same way — a `[0, 1]` position
+   * over an encoding puts most of its travel where no photograph has pixels.
+   */
+  readonly splitShadowTint: readonly number[]
+  readonly splitHighlightTint: readonly number[]
+  readonly splitBalance: number
 
   /**
    * Grain period, as a fraction of the source image's long edge.
@@ -338,6 +364,18 @@ const SCALARS: readonly ScalarParameter[] = [
     defaultValue: 0.85,
     unit: '',
   },
+  {
+    kind: 'scalar',
+    key: 'splitBalance',
+    label: 'Split tone: balance',
+    // In stops from middle grey. See src/core/colour/splitTone.ts for why this
+    // is not a position in the encoded domain.
+    min: SPLIT_BALANCE_MIN,
+    max: SPLIT_BALANCE_MAX,
+    step: 0.05,
+    defaultValue: 0,
+    unit: 'EV',
+  },
 ]
 
 /**
@@ -380,6 +418,12 @@ export const DEFAULT_EDIT_STATE: EditState = {
   lift: [0, 0, 0],
   gamma: [0, 0, 0],
   gain: [0, 0, 0],
+  hslHue: [0, 0, 0, 0, 0, 0],
+  hslSaturation: [0, 0, 0, 0, 0, 0],
+  hslLuminance: [0, 0, 0, 0, 0, 0],
+  splitShadowTint: [0, 0, 0],
+  splitHighlightTint: [0, 0, 0],
+  splitBalance: 0,
 }
 
 /**
@@ -463,6 +507,66 @@ const VECTORS: readonly VectorParameter[] = [
     identityValue: [0, 0, 0],
     components: ['Red', 'Green', 'Blue'],
   },
+  {
+    kind: 'vector',
+    key: 'hslHue',
+    label: 'Hue by band',
+    length: HSL_BAND_COUNT,
+    min: -HSL_HUE_RANGE,
+    max: HSL_HUE_RANGE,
+    step: 0.5,
+    defaultValue: [0, 0, 0, 0, 0, 0],
+    identityValue: [0, 0, 0, 0, 0, 0],
+    components: HSL_BANDS,
+  },
+  {
+    kind: 'vector',
+    key: 'hslSaturation',
+    label: 'Saturation by band',
+    length: HSL_BAND_COUNT,
+    min: -HSL_SATURATION_RANGE,
+    max: HSL_SATURATION_RANGE,
+    step: 0.01,
+    defaultValue: [0, 0, 0, 0, 0, 0],
+    identityValue: [0, 0, 0, 0, 0, 0],
+    components: HSL_BANDS,
+  },
+  {
+    kind: 'vector',
+    key: 'hslLuminance',
+    label: 'Luminance by band',
+    length: HSL_BAND_COUNT,
+    min: -HSL_LUMINANCE_RANGE,
+    max: HSL_LUMINANCE_RANGE,
+    step: 0.01,
+    defaultValue: [0, 0, 0, 0, 0, 0],
+    identityValue: [0, 0, 0, 0, 0, 0],
+    components: HSL_BANDS,
+  },
+  {
+    kind: 'vector',
+    key: 'splitShadowTint',
+    label: 'Split tone: shadows',
+    length: 3,
+    min: -SPLIT_TINT_RANGE,
+    max: SPLIT_TINT_RANGE,
+    step: 0.001,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'splitHighlightTint',
+    label: 'Split tone: highlights',
+    length: 3,
+    min: -SPLIT_TINT_RANGE,
+    max: SPLIT_TINT_RANGE,
+    step: 0.001,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
 ]
 
 const CURVES: readonly CurveParameter[] = [
@@ -487,7 +591,11 @@ const CURVES: readonly CurveParameter[] = [
  * control all follow from the row's `kind` through the registry in
  * `parameterKinds.ts`, without any consumer learning that the kind exists.
  */
-export const PARAMETERS: readonly ParameterDescriptor[] = [...SCALARS, ...VECTORS, ...CURVES]
+export const PARAMETERS: readonly ParameterDescriptor[] = [
+  ...SCALARS,
+  ...VECTORS,
+  ...CURVES,
+]
 
 /**
  * Views onto {@link PARAMETERS}, derived rather than maintained.

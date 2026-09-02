@@ -26,6 +26,8 @@ import { createFilmCurvesPass } from './passes/filmCurves'
 import { HALATION_PASSES } from './passes/halation'
 import { grainPass } from './passes/grain'
 import { wheelsPass } from './passes/wheels'
+import { hslPass } from './passes/hsl'
+import { splitTonePass } from './passes/splitTone'
 import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
 import type { FilmCurvesPass } from './passes/filmCurves'
@@ -204,6 +206,8 @@ export class Renderer {
       this.#curvePass,
       // After the tone curve, within the grade stage.
       wheelsPass,
+      hslPass,
+      splitTonePass,
       contrastPass,
       // Halation before the curves, within the film stage. Registration order
       // decides inside a stage, and this one is physical: halation adds light to

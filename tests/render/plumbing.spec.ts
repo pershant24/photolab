@@ -80,13 +80,16 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     // which does not exist until they have produced it.
     'grain',
     'toneCurve',
-    // The wheels sit after the tone curve inside the grade stage.
+    // The grade stage in order: the curve shapes tone, the wheels tint by zone,
+    // HSL works by hue, split toning tints the two ends, and contrast is last.
     'wheels',
+    'hsl',
+    'splitTone',
     'contrast',
     'display',
   ])
 
-  // Three of the fifteen passes run at the default edit: imageSource is
+  // Three of the seventeen passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
   //
