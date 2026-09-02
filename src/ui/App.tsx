@@ -1,10 +1,9 @@
 import { useStore } from 'zustand'
 
-import { EDIT_PARAMETERS } from '../core/state/editState'
+import { PARAMETERS } from '../core/state/editState'
 import { editorStore } from '../core/state/editorStore'
-import { CurveEditor } from './CurveEditor'
+import { ParameterControl } from './controls/registry'
 import { FilmStocks } from './FilmStocks'
-import { ParameterSlider } from './ParameterSlider'
 import { Viewport } from './Viewport'
 
 /**
@@ -44,11 +43,18 @@ function Adjustments() {
       aria-label="Adjustments"
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {EDIT_PARAMETERS.map((descriptor) => (
-          <ParameterSlider key={descriptor.key} descriptor={descriptor} />
+        {/*
+          One loop over one table, in the table's own order. Which control a row
+          gets is the registry's business, so adding a colour wheel is registering
+          a component rather than editing this file — and the panel does not
+          branch on kind, which is the property the conversion was for.
+        */}
+        {PARAMETERS.map((descriptor) => (
+          <ParameterControl key={descriptor.key} descriptor={descriptor} />
         ))}
+
+        {/* Not a parameter: a preset picker that writes several of them. */}
         <FilmStocks />
-        <CurveEditor />
       </div>
 
       <div className="mt-auto flex gap-2 border-t border-hairline px-4 py-3 text-xs">

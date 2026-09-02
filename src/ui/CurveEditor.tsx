@@ -16,18 +16,18 @@ import { useCallback, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 
 import { evaluateCurve } from '../core/colour/curve'
-import { CURVE_PARAMETERS, splitControlPoints, withCurve } from '../core/state/editState'
+import { splitControlPoints, withCurve } from '../core/state/editState'
+import type { CurveParameter } from '../core/state/editState'
 import { editorStore } from '../core/state/editorStore'
 
 const SIZE = 240
-const DESCRIPTOR = CURVE_PARAMETERS[0]
 
-export function CurveEditor() {
-  const points = useStore(editorStore, (state) => state.edit.toneCurve)
+export function CurveEditor({ descriptor }: { descriptor: CurveParameter }) {
+  const DESCRIPTOR = descriptor
+  const points = useStore(editorStore, (state) => state.edit[descriptor.key])
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
 
-  if (!DESCRIPTOR) return null
   const [lo, hi] = DESCRIPTOR.domain
 
   const toScreen = (x: number, y: number): [number, number] => [
@@ -46,7 +46,7 @@ export function CurveEditor() {
   }
 
   const commit = useCallback((next: number[]) => {
-    editorStore.setState((state) => ({ edit: withCurve(state.edit, 'toneCurve', next) }))
+    editorStore.setState((state) => ({ edit: withCurve(state.edit, descriptor.key, next) }))
   }, [])
 
   const { xs, ys } = splitControlPoints(points)

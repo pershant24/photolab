@@ -1,4 +1,17 @@
 import { encodeACEScct } from '../colour/transfer'
+import {
+  defaultParameter,
+  parameterIsIdentity,
+  parametersEqual,
+  sanitiseParameter,
+  snapshotParameter,
+} from './parameterKinds'
+import type {
+  CurveDescriptor,
+  ParameterDescriptor,
+  ParameterValue,
+  ScalarDescriptor,
+} from './parameterKinds'
 import { NEUTRAL_TEMPERATURE, NEUTRAL_TINT } from '../colour/whiteBalance'
 import { FILM_DOMAIN, IDENTITY_CHANNEL, isIdentityChannel } from '../colour/filmStock'
 import type { FilmStock } from '../colour/filmStock'
@@ -120,25 +133,19 @@ export type NumericEditKey = {
   [K in keyof EditState]: EditState[K] extends number ? K : never
 }[keyof EditState]
 
+export type { ParameterDescriptor, ScalarDescriptor, CurveDescriptor } from './parameterKinds'
+
 /**
- * Static metadata for one numeric parameter: everything the interface needs to
- * present it and everything loading needs to validate it.
+ * The registry's descriptor types, narrowed to this build's actual keys.
  *
- * Kept as plain data rather than carrying a formatter, so the table stays as
- * serialisable as the state it describes and formatting stays a presentation
- * decision.
+ * The registry has to type `key` as `string`, because it is heterogeneous by
+ * construction and cannot know the state shape. Narrowing it back here means a
+ * consumer holding a scalar descriptor gets a `NumericEditKey` and can index
+ * `EditState` with it, which is what the tables were worth before the conversion
+ * and would otherwise have been lost to it.
  */
-export interface ParameterDescriptor {
-  readonly key: NumericEditKey
-  readonly label: string
-  readonly min: number
-  readonly max: number
-  /** Slider granularity. Not a constraint on the value; see {@link clampParameter}. */
-  readonly step: number
-  readonly defaultValue: number
-  /** Suffix for display. Empty when the parameter is a bare ratio. */
-  readonly unit: string
-}
+export type ScalarParameter = ScalarDescriptor & { readonly key: NumericEditKey }
+export type CurveParameter = CurveDescriptor & { readonly key: CurveEditKey }
 
 /**
  * The parameter table. Adding a parameter is adding a field to `EditState`, a
@@ -149,8 +156,9 @@ export interface ParameterDescriptor {
  * accepts a negative contrast slope, which inverts the image; that is not
  * something a slider should offer, and the two decisions are kept separate.
  */
-export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
+const SCALARS: readonly ScalarParameter[] = [
   {
+    kind: 'scalar',
     key: 'exposure',
     label: 'Exposure',
     // Five stops either way covers recovering a badly underexposed frame and
@@ -163,6 +171,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: 'EV',
   },
   {
+    kind: 'scalar',
     key: 'contrast',
     label: 'Contrast',
     // A slope of 2 in ACEScct squares the ratio between any two channels in
@@ -182,6 +191,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'temperature',
     label: 'Temperature',
     // The range the Planckian fit is valid over, narrowed at the top: above
@@ -194,6 +204,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: 'K',
   },
   {
+    kind: 'scalar',
     key: 'tint',
     label: 'Tint',
     min: -100,
@@ -203,6 +214,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'filmStrength',
     label: 'Film strength',
     min: 0,
@@ -212,6 +224,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'halationStrength',
     label: 'Halation',
     min: 0,
@@ -221,6 +234,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'halationThreshold',
     label: 'Halation threshold',
     // In stops from middle grey, and the range is bounded by where data is
@@ -246,6 +260,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: 'EV',
   },
   {
+    kind: 'scalar',
     key: 'halationRadius',
     label: 'Halation radius',
     // A fraction of the source long edge, so it is the same size on a proxy and
@@ -258,6 +273,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'grainStrength',
     label: 'Grain',
     min: 0,
@@ -267,6 +283,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'grainSize',
     label: 'Grain size',
     // A fraction of the source long edge. 0.0009 is about 5.4 source pixels on a
@@ -285,6 +302,7 @@ export const EDIT_PARAMETERS: readonly ParameterDescriptor[] = [
     unit: '',
   },
   {
+    kind: 'scalar',
     key: 'toneMapKnee',
     label: 'Highlight roll-off',
     // A single default cannot serve both an unedited photograph and a heavily
@@ -363,25 +381,56 @@ export type CurveEditKey = {
   [K in keyof EditState]: EditState[K] extends number[] ? K : never
 }[keyof EditState]
 
-export interface CurveDescriptor {
-  readonly key: CurveEditKey
-  readonly label: string
-  /** The range control point x values must lie within. */
-  readonly domain: readonly [number, number]
-  readonly defaultValue: readonly number[]
-}
-
-export const CURVE_PARAMETERS: readonly CurveDescriptor[] = [
+const CURVES: readonly CurveParameter[] = [
   {
+    kind: 'curve',
     key: 'toneCurve',
     label: 'Tone curve',
     domain: TONE_CURVE_DOMAIN,
     defaultValue: [TONE_CURVE_DOMAIN[0], TONE_CURVE_DOMAIN[0], 1, 1],
   },
-  { key: 'filmCurveRed', label: 'Film red', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
-  { key: 'filmCurveGreen', label: 'Film green', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
-  { key: 'filmCurveBlue', label: 'Film blue', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
+  { kind: 'curve', hidden: true, key: 'filmCurveRed', label: 'Film red', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
+  { kind: 'curve', hidden: true, key: 'filmCurveGreen', label: 'Film green', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
+  { kind: 'curve', hidden: true, key: 'filmCurveBlue', label: 'Film blue', domain: FILM_DOMAIN, defaultValue: IDENTITY_CHANNEL },
 ]
+
+/**
+ * **The** parameter table: one row per field of {@link EditState}, in the order
+ * the interface presents them.
+ *
+ * Adding a parameter is adding a field to `EditState`, a row here, and a default
+ * below. Validation, merging, snapshotting, equality, the identity check and the
+ * control all follow from the row's `kind` through the registry in
+ * `parameterKinds.ts`, without any consumer learning that the kind exists.
+ */
+export const PARAMETERS: readonly ParameterDescriptor[] = [...SCALARS, ...CURVES]
+
+/**
+ * Views onto {@link PARAMETERS}, derived rather than maintained.
+ *
+ * These exist because a slider panel genuinely wants only the scalars and a curve
+ * editor genuinely wants only the curves. They are a query against the one table,
+ * not a second and third table to keep in step — which is what they were before
+ * the registry, and what made a third kind expensive.
+ */
+export const EDIT_PARAMETERS: readonly ScalarParameter[] = SCALARS
+export const CURVE_PARAMETERS: readonly CurveParameter[] = CURVES
+
+const BY_KEY = new Map<string, ParameterDescriptor>(PARAMETERS.map((p) => [p.key, p]))
+
+export class UnknownParameterError extends RangeError {}
+
+/** The descriptor for a key, whatever its kind. */
+export function descriptorFor(key: string): ParameterDescriptor {
+  const descriptor = BY_KEY.get(key)
+  if (!descriptor) throw new UnknownParameterError(`no descriptor for parameter "${key}"`)
+  return descriptor
+}
+
+/** Whether a key is one this build knows about. Used when loading a preset. */
+export function isKnownParameter(key: string): boolean {
+  return BY_KEY.has(key)
+}
 
 /**
  * A film stock as a `Partial<EditState>` — which is what a preset is.
@@ -419,43 +468,15 @@ export function isFilmStageIdentity(state: EditState): boolean {
 /**
  * Bring a control point array into a usable state, or fall back to the default.
  *
- * Rejects rather than repairs anything structurally wrong — an odd length, fewer
- * than two points, a non-finite value, x values that do not strictly increase —
- * because a repaired curve is a different curve, and silently substituting one is
- * worse than visibly falling back. Values *within* a valid structure are clamped,
- * since that is a bound rather than a shape.
+ * Now a thin call into the registry, which owns the rules: reject anything
+ * structurally wrong — an odd length, fewer than two points, a non-finite value,
+ * x values that decrease — because a repaired curve is a different curve and
+ * silently substituting one is worse than visibly falling back. Values *within* a
+ * valid structure are clamped, since that is a bound rather than a shape.
  */
 export function sanitiseCurve(key: CurveEditKey, points: readonly number[]): number[] {
-  const descriptor = CURVE_PARAMETERS.find((c) => c.key === key)
-  if (!descriptor) throw new RangeError(`no descriptor for curve "${key}"`)
-  const fallback = [...descriptor.defaultValue]
-
-  // Checked through an `unknown` local rather than on `points` directly:
-  // `Array.isArray` narrows a `readonly T[]` to `any[]`, which would quietly
-  // switch off type checking for the rest of this function. The runtime check
-  // still earns its place — a preset loaded from disk reaches here as untrusted
-  // data whatever the signature says.
-  const candidate: unknown = points
-  if (!Array.isArray(candidate) || candidate.length < 4 || candidate.length % 2 !== 0) {
-    return fallback
-  }
-  const values: unknown[] = candidate
-  if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) return fallback
-  const numbers = values as number[]
-
-  const [lo, hi] = descriptor.domain
-  const out: number[] = []
-  let previousX = -Infinity
-  for (let i = 0; i < numbers.length; i += 2) {
-    const x = Math.min(hi, Math.max(lo, numbers[i] ?? Number.NaN))
-    const y = numbers[i + 1] ?? Number.NaN
-    // Clamping x could collapse two points onto each other, which the spline
-    // rejects; falling back is the honest response.
-    if (!(x > previousX)) return fallback
-    previousX = x
-    out.push(x, y)
-  }
-  return out
+  const descriptor = descriptorFor(key)
+  return sanitiseParameter(descriptor, points, defaultParameter(descriptor)) as number[]
 }
 
 /** Split interleaved control points into the two arrays the spline works on. */
@@ -476,42 +497,23 @@ export function splitControlPoints(points: readonly number[]): {
  * Whether a curve is its descriptor's identity, in which case its pass is
  * skipped.
  *
- * Compared against the descriptor rather than against hardcoded endpoints, so
- * the identity follows the domain instead of having to be remembered alongside
- * it. A curve that is the identity by shape but carries extra control points is
- * not detected, which costs a redundant pass and never a wrong image.
+ * Compared against the descriptor rather than against hardcoded endpoints, so the
+ * identity follows the domain instead of having to be remembered alongside it. A
+ * curve that is the identity by shape but carries extra control points is not
+ * detected, which costs a redundant pass and never a wrong image.
  */
 export function isIdentityCurve(key: CurveEditKey, points: readonly number[]): boolean {
-  const descriptor = CURVE_PARAMETERS.find((c) => c.key === key)
-  if (!descriptor) return false
-  const identity = descriptor.defaultValue
-  return points.length === identity.length && points.every((v, i) => v === identity[i])
+  return parameterIsIdentity(descriptorFor(key), [...points])
 }
 
-const DESCRIPTORS_BY_KEY = new Map<NumericEditKey, ParameterDescriptor>(
-  EDIT_PARAMETERS.map((parameter) => [parameter.key, parameter]),
-)
-
-export function parameterDescriptor(key: NumericEditKey): ParameterDescriptor {
-  const descriptor = DESCRIPTORS_BY_KEY.get(key)
-  if (!descriptor) throw new RangeError(`no descriptor for parameter "${key}"`)
+export function parameterDescriptor(key: NumericEditKey): ScalarDescriptor {
+  const descriptor = descriptorFor(key)
+  if (descriptor.kind !== 'scalar') {
+    throw new UnknownParameterError(`parameter "${key}" is not a scalar`)
+  }
   return descriptor
 }
 
-/**
- * Bring a value into the parameter's range, replacing anything non-finite with
- * the default.
- *
- * `NaN` is the case that matters. It arrives from an empty number input, a
- * malformed preset or a division in a future derived parameter, and it does not
- * announce itself: `NaN` compared against a range is neither too big nor too
- * small, so an unchecked value propagates into the shader and turns a region of
- * the image into undefined output. Failing back to the default is recoverable;
- * a frame of `NaN` is not diagnosable from the picture.
- *
- * The value is **not** snapped to `step`. Step is slider granularity; a preset
- * or a typed value is free to sit between stops.
- */
 export function clampParameter(key: NumericEditKey, value: number): number {
   const descriptor = parameterDescriptor(key)
   if (!Number.isFinite(value)) return descriptor.defaultValue
@@ -524,21 +526,27 @@ export function clampParameter(key: NumericEditKey, value: number): number {
  *
  * A merge is a spread, and this exists for the validation rather than for the
  * merge: a preset loaded from disk is untrusted input, and it reaches the shader
- * if nothing checks it. Unknown keys are dropped rather than carried, so a
- * preset written against a later version of the application cannot smuggle a
- * field into a state that is then snapshotted into undo history.
+ * if nothing checks it.
+ *
+ * **Unknown keys are dropped rather than carried**, because the loop is over the
+ * parameter table and not over the patch's own keys. A preset written against a
+ * later version of the application therefore cannot smuggle a field into a state
+ * that is then snapshotted into undo history. That property comes from the
+ * direction of the iteration, so it survives any number of new kinds.
+ *
+ * Every value that is *not* being replaced is snapshotted rather than referenced,
+ * so no two states share a mutable array.
  */
 export function mergeEditState(base: EditState, patch: Partial<EditState>): EditState {
-  const merged: Record<string, number | number[]> = {}
-  for (const descriptor of EDIT_PARAMETERS) {
-    const incoming = patch[descriptor.key]
+  const source = base as unknown as Record<string, ParameterValue>
+  const incoming = patch as unknown as Record<string, unknown>
+  const merged: Record<string, ParameterValue> = {}
+  for (const descriptor of PARAMETERS) {
+    const current = source[descriptor.key] ?? defaultParameter(descriptor)
     merged[descriptor.key] =
-      incoming === undefined ? base[descriptor.key] : clampParameter(descriptor.key, incoming)
-  }
-  for (const descriptor of CURVE_PARAMETERS) {
-    const incoming = patch[descriptor.key]
-    merged[descriptor.key] =
-      incoming === undefined ? [...base[descriptor.key]] : sanitiseCurve(descriptor.key, incoming)
+      incoming[descriptor.key] === undefined
+        ? snapshotParameter(descriptor, current)
+        : sanitiseParameter(descriptor, incoming[descriptor.key], current)
   }
   return merged as unknown as EditState
 }
@@ -550,9 +558,7 @@ export function mergeEditState(base: EditState, patch: Partial<EditState>): Edit
  * rather than repeated at every call site with a computed key.
  */
 export function withParameter(state: EditState, key: NumericEditKey, value: number): EditState {
-  const next: Record<string, unknown> = { ...state }
-  next[key] = clampParameter(key, value)
-  return next as unknown as EditState
+  return withValue(state, key, value)
 }
 
 /** A copy of `state` with one curve replaced, validated. */
@@ -561,20 +567,55 @@ export function withCurve(
   key: CurveEditKey,
   points: readonly number[],
 ): EditState {
+  return withValue(state, key, [...points])
+}
+
+/**
+ * A copy of `state` with one parameter of any kind replaced, validated.
+ *
+ * The kind-agnostic form the registry makes possible. `withParameter` and
+ * `withCurve` remain as the typed entry points, because a caller that knows it is
+ * setting a number should not be able to hand in an array by mistake.
+ */
+export function withValue(state: EditState, key: string, value: unknown): EditState {
+  const descriptor = descriptorFor(key)
+  const source = state as unknown as Record<string, ParameterValue>
   const next: Record<string, unknown> = { ...state }
-  next[key] = sanitiseCurve(key, points)
+  next[key] = sanitiseParameter(descriptor, value, source[key] ?? defaultParameter(descriptor))
   return next as unknown as EditState
 }
 
 /** Whether two states describe the same edit. Flat, so a key-wise compare is exact. */
 export function editStatesEqual(a: EditState, b: EditState): boolean {
-  if (!EDIT_PARAMETERS.every((descriptor) => a[descriptor.key] === b[descriptor.key])) return false
+  const left = a as unknown as Record<string, ParameterValue>
+  const right = b as unknown as Record<string, ParameterValue>
   // By value, not by reference. Two states reached by different routes hold
   // different arrays, and history compares snapshots to decide whether anything
   // changed — a reference compare would record an entry for every drag frame.
-  return CURVE_PARAMETERS.every((descriptor) => {
-    const left = a[descriptor.key]
-    const right = b[descriptor.key]
-    return left.length === right.length && left.every((v, i) => v === right[i])
+  return PARAMETERS.every((descriptor) => {
+    const l = left[descriptor.key]
+    const r = right[descriptor.key]
+    if (l === undefined || r === undefined) return l === r
+    return parametersEqual(descriptor, l, r)
   })
+}
+
+/** A deep copy, safe to store in history. Every kind supplies its own copy rule. */
+export function snapshotEditState(state: EditState): EditState {
+  const source = state as unknown as Record<string, ParameterValue>
+  const out: Record<string, ParameterValue> = {}
+  for (const descriptor of PARAMETERS) {
+    out[descriptor.key] = snapshotParameter(
+      descriptor,
+      source[descriptor.key] ?? defaultParameter(descriptor),
+    )
+  }
+  return out as unknown as EditState
+}
+
+/** Whether a parameter is at the value that makes its pass a no-op. */
+export function isParameterIdentity(state: EditState, key: string): boolean {
+  const descriptor = descriptorFor(key)
+  const source = state as unknown as Record<string, ParameterValue>
+  return parameterIsIdentity(descriptor, source[key] ?? defaultParameter(descriptor))
 }

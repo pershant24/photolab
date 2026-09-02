@@ -28,7 +28,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useStore } from 'zustand'
 
 import { editorStore } from '../core/state/editorStore'
-import type { ParameterDescriptor } from '../core/state/editState'
+import type { ScalarParameter } from '../core/state/editState'
 
 /** Keys a range input responds to by changing its value. */
 const VALUE_KEYS = new Set([
@@ -42,7 +42,7 @@ const VALUE_KEYS = new Set([
   'End',
 ])
 
-export function ParameterSlider({ descriptor }: { descriptor: ParameterDescriptor }) {
+export function ParameterSlider({ descriptor }: { descriptor: ScalarParameter }) {
   const value = useStore(editorStore, (state) => state.edit[descriptor.key])
   const gestureOpen = useRef(false)
 
