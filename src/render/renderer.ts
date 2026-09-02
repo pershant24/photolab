@@ -15,20 +15,9 @@ import { DEFAULT_EDIT_STATE } from '../core/state/editState'
 import type { RenderContext } from './gl/context'
 import { createRenderContext } from './gl/context'
 import { RenderGraph } from './graph'
-import { testPatternPass } from './passes/testPattern'
-import { imageSourcePass } from './passes/imageSource'
-import { ingestPass } from './passes/ingest'
-import { whiteBalancePass } from './passes/whiteBalance'
-import { exposurePass } from './passes/exposure'
-import { contrastPass } from './passes/contrast'
+import { registeredPasses } from './passes/registry'
 import { createCurvePass } from './passes/curve'
 import { createFilmCurvesPass } from './passes/filmCurves'
-import { HALATION_PASSES } from './passes/halation'
-import { grainPass } from './passes/grain'
-import { wheelsPass } from './passes/wheels'
-import { hslPass } from './passes/hsl'
-import { splitTonePass } from './passes/splitTone'
-import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
 import type { FilmCurvesPass } from './passes/filmCurves'
 import type { PassContext, RenderInput, RenderSource, ViewState } from './passes/types'
@@ -198,46 +187,10 @@ export class Renderer {
     this.#context = createRenderContext(canvas)
     this.#curvePass = createCurvePass()
     this.#filmCurvesPass = createFilmCurvesPass()
-    this.#graph = new RenderGraph(this.#context, [
-      // Registration order is not execution order; the graph sorts by stage.
-      // Deliberately listed out of order here so that the ordering test is
-      // asserting something rather than restating the array.
-      displayPass,
-      // The grade stage, in registration order: tonal shaping first, colour trim
-      // after.
-      //
-      // Contrast used to run LAST, which put the two tonal controls on opposite
-      // sides of the three colour controls. That is incoherent on its own, and it
-      // had a measurable cost: contrast is a slope about grey in ACEScct and the
-      // wheels add offsets in the same space, so a later contrast scaled every
-      // wheel exactly in proportion — a lift set at 0.04 became 0.024 at contrast
-      // 0.6 and 0.064 at 1.6. A colourist who set a lift and then raised contrast
-      // found the lift stronger than they left it, which is precisely the fussy
-      // interaction a grade stage should not have. It also moved middle grey away
-      // from the pivot contrast was about to use.
-      //
-      // Shaping tone and then trimming colour is also the order people work in.
-      this.#curvePass,
-      contrastPass,
-      wheelsPass,
-      hslPass,
-      splitTonePass,
-      // Halation before the curves, within the film stage. Registration order
-      // decides inside a stage, and this one is physical: halation adds light to
-      // the emulsion, so it happens before the curves turn exposure into
-      // density. Listed here rather than left to chance.
-      ...HALATION_PASSES,
-      this.#filmCurvesPass,
-      // Grain last inside the film stage, and registration order is what decides
-      // that: its magnitude depends on the developed density, which does not
-      // exist until the curves have produced it.
-      grainPass,
-      testPatternPass,
-      imageSourcePass,
-      whiteBalancePass,
-      exposurePass,
-      ingestPass,
-    ])
+    this.#graph = new RenderGraph(
+      this.#context,
+      registeredPasses(this.#curvePass, this.#filmCurvesPass),
+    )
 
     this.#unsubscribe = this.#context.onStatusChange((status) => {
       if (status === 'ok') {

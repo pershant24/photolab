@@ -312,11 +312,20 @@ test.describe('grain amplitude tracks density', () => {
           gl.readPixels(0, 0, width, height, gl.RGBA, gl.HALF_FLOAT, raw)
           gl.bindFramebuffer(gl.FRAMEBUFFER, null)
           renderer.graph.pool.release(target)
-          // The band of rows where the modulation is strong.
+          // Rows selected by their MEASURED level, not by index.
+          //
+          // `readPixels` is bottom-up, so the ramp arrives inverted and a band
+          // chosen by row index is a different band from the one intended. Here
+          // it happened to land somewhere usable, which is worse than failing:
+          // the same assumption elsewhere in this file produced a comparison
+          // against zero samples that passed silently.
           const out: number[] = []
-          const from = Math.round(height * 0.45)
-          const to = Math.round(height * 0.75)
-          for (let y = from; y < to; y++) {
+          for (let y = 0; y < height; y++) {
+            let mean = 0
+            for (let x = 0; x < width; x++) mean += decodeHalf(raw[(y * width + x) * 4] ?? 0)
+            mean /= width
+            // Around middle grey, where the modulation is strong.
+            if (mean < 0.25 || mean > 0.6) continue
             for (let x = 0; x < width; x++) out.push(decodeHalf(raw[(y * width + x) * 4] ?? 0))
           }
           return out
@@ -415,11 +424,19 @@ test.describe('grain amplitude tracks density', () => {
         const off = grab({ ...edit, grainStrength: 0 })
 
         // Rows well inside the modulation's reach, so the residual is real.
-        const from = Math.round(height * 0.45)
-        const to = Math.round(height * 0.75)
+        // Selected by measured level rather than by row index; readPixels is
+        // bottom-up and an index-chosen band is the wrong end of the ramp.
+        const rowMean = (y: number, buffer: Float32Array): number => {
+          let sum = 0
+          for (let x = 0; x < width; x++) sum += buffer[(y * width + x) * 3] ?? 0
+          return sum / width
+        }
+        const from = 0
+        const to = height
         const cov = [0, 0, 0, 0, 0, 0, 0, 0, 0]
         let n = 0
         for (let y = from; y < to; y++) {
+          if (rowMean(y, off) < 0.25 || rowMean(y, off) > 0.6) continue
           for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 3
             const d = [

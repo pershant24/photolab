@@ -980,3 +980,110 @@ was written against is not necessarily this one.
 
 An import drops a bad field rather than failing: one bad entry should cost that
 entry, and the caller is told what went. Only an unrecognisable envelope is fatal.
+
+## The gamut compressor, restated truthfully
+
+The Stage 6 bound was documented as a general guarantee and was fitted to seven
+colours reachable by white balance, which move roughly along the blue-yellow
+axis. HSL saturation reaches any hue. **This is the occupancy failure one level
+up — applied to a test's input space rather than to a parameter's domain.** The
+same question had been asked three times about parameters and never once about
+the colours a test feeds itself.
+
+### The brief's diagnosis was wrong, and the measurement says which option to take
+
+The failures were described as uncorrelated with excursion and therefore
+unpredictable. They are not unpredictable: the shift is a smooth, strong function
+of **hue angle**, measured at fixed chroma across a full turn —
+
+| hue | 0 | 45 | 90 | 150 | 255 | 345 |
+|---|---|---|---|---|---|---|
+| worst compressed shift | 28.9° | 2.2° | 15.9° | 0.6° | 18.0° | 0.9° |
+
+Peaking at red, near zero at cyan. That is hue-dependence, which is exactly why
+the ACES compressor carries per-primary limits — so it appears to point at the
+hue-aware option.
+
+**It does not, and the measurement is decisive.** Sweeping the threshold at the
+worst hue, which is what a per-hue limit varies:
+
+| threshold | 0.7 | 0.8 | 0.9 | 0.95 | 0.99 |
+|---|---|---|---|---|---|
+| worst shift at red | 34.9° | 32.6° | 28.9° | 25.9° | 22.7° |
+
+The entire range spans 34.9° to 22.7°, and **clipping itself is 22.3°**. A
+hue-varying threshold is a continuous slide toward clipping and cannot get below
+what clipping already costs. It could not make the bound true, so the choice is
+to re-measure and restate.
+
+### The documented claim was false in a second way
+
+`display.ts` said the operator preserved hue "to floating point, not
+approximately", citing a colour holding its CIELAB angle exactly. Measured, that
+colour moves **17.1 degrees**.
+
+Two different claims had been merged. The chroma vector's direction in *linear
+sRGB* is preserved exactly — the cosine between before and after is
+1.000000000000, and that is now asserted. CIELAB hue is a nonlinear function of
+the same values, and a straight line toward the achromatic point in linear RGB is
+not a constant-hue line in CIELAB. The deviation is the Abney effect and is real.
+
+### The bound, measured over everything the pipeline can reach
+
+A dense sweep of linear sRGB from −0.6 to 2.0 per channel, covering the negatives
+wide-gamut conversion produces and the values above one that exposure and the
+grade produce:
+
+- worst compressed CIELAB hue shift **63.0°**
+- worst clipped CIELAB hue shift **91.4°**
+- compression at least as good as clipping on **79.8%** of samples
+
+So compression has the better worst case and is better most of the time, and is
+**not uniformly better**. That is what is now documented and asserted.
+
+## Stage positions, for every pass
+
+Contrast ran at the end of the grade stage for two stages while every pass
+involved was individually correct. No agreement test could see it — each pass
+matched its own reference. No identity test could see it — each was exactly the
+identity at neutral. It was an **ordering defect between correct passes**, and
+the only positions asserted anywhere were exposure and contrast from Stage 4.
+
+`tests/unit/pass-positions.test.ts` now asserts a relative-order constraint per
+pair, never an index: indices are shorter to write, break on every pass added,
+get relaxed on every pass added, and assert nothing within two stages.
+
+**The coverage rule is the part that keeps working.** Every registered pass must
+appear in the constraint table or in an explicit exemption list with a reason, so
+a pass added without a declared position fails rather than passing silently.
+Registration was extracted to `src/render/passes/registry.ts` so the test asserts
+the real list rather than a copy — a test that restates the array proves only
+that someone typed the same thing twice.
+
+Three mutations watched: contrast returned to the end of the grade stage (2
+failures), grain moved before the film curves (1), and a new pass registered with
+no declared position (caught by the coverage rule).
+
+## Two method fixes, in one helper
+
+`tests/support/readback.ts` exists because both mistakes are structural rather
+than slips.
+
+**Colour space.** Reading `displayMode: 'identity'` output as linear ACEScg has
+happened twice, both times immediately after writing the comment explaining why
+it is wrong. The mode names what the pass *does*, not what space its output is
+in. A readback now carries `space` with it, `assertSpace` makes a caller say what
+it expects, and there is deliberately no `'linear-acescg'` member — nothing can
+produce one from a final-target render, and offering the name would invite the
+assumption.
+
+**Row orientation.** `readPixels` is bottom-up, and indexing rows directly
+produced a comparison against zero samples that passed silently. The helper flips
+once on the way out and exposes `at(x, y)` in image coordinates, never an index.
+
+The audit of existing helpers found sixteen specs reading pixels back. Three
+indexed rows without compensating; two of those compare frames element-wise or
+derive the level from the measurement, so orientation cancels. The third,
+`grain.spec.ts`, selected a "band near middle grey" by row index and landed
+somewhere usable only because the ramp is symmetric about its middle — both bands
+now select by measured level.

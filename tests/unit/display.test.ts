@@ -174,6 +174,33 @@ describe('gamut compression', () => {
     }
   })
 
+  it('preserves the linear-RGB chroma direction exactly, which is the real guarantee', () => {
+    // The invariant the operator actually gives, and the one worth asserting
+    // exactly: every channel moves toward the achromatic value in the same
+    // proportion, so the chroma vector keeps its direction and only its length
+    // changes.
+    //
+    // This is here because the CIELAB claim below used to be stated as this one.
+    // They are different, and conflating them is what let a bound fitted to seven
+    // colours be documented as a general guarantee.
+    const cases: Vec3[] = [
+      [1, -0.3, -0.1], [0.9, -0.15, 0.4], [0.2, 1.1, -0.35],
+      [-0.25, 0.6, 1], [-0.4, -0.1, 1], [1.4, 0.35, -0.2], [0.31, -0.08, -0.47],
+    ]
+    for (const original of cases) {
+      const out = gamutCompressRgb(original, GAMUT_COMPRESS_THRESHOLD)
+      const a0 = Math.max(...original)
+      const a1 = Math.max(...out)
+      const before = original.map((v) => v - a0)
+      const after = out.map((v) => v - a1)
+      const n0 = Math.hypot(...before)
+      const n1 = Math.hypot(...after)
+      if (n0 < 1e-9 || n1 < 1e-9) continue
+      const cosine = before.reduce((s, v, i) => s + v * (after[i] ?? 0), 0) / (n0 * n1)
+      expect(cosine, `chroma direction on ${original.join(', ')}`).toBeCloseTo(1, 10)
+    }
+  })
+
   it('shifts perceptual hue far less than clipping does', () => {
     // Measured in CIELAB, where scaling toward achromatic in linear RGB does
     // *not* preserve hue, so the operator can fail this and the number means
@@ -242,7 +269,10 @@ describe('gamut compression', () => {
       expect(compressedShift, `hue shift on ${original.join(', ')}`).toBeLessThan(20)
     }
 
-    expect(worse.join('\n'), 'compression must not be worse than clipping on any colour').toBe('')
+    // On THESE colours, compression wins on every one. Stated as a fact about
+    // this sample rather than as a general guarantee, which is what it used to
+    // be and what turned out to be false — see the sweep below.
+    expect(worse.join('\n'), 'compression is worse than clipping on a Stage 6 colour').toBe('')
     // Measured at 39.8 against 115.9. Asserted with room, since the point is the
     // margin rather than the exact figure.
     expect(compressedTotal).toBeLessThan(clippedTotal / 2)
@@ -421,5 +451,107 @@ describe('the assembled display transform', () => {
     expect(a).toBeLessThan(1)
     expect(b).toBeLessThan(1)
     expect(b).toBeGreaterThan(a)
+  })
+})
+
+describe('the gamut compressor over everything the pipeline can reach', () => {
+  /**
+   * The bound, restated as a worst case measured over the whole space.
+   *
+   * The Stage 6 version was fitted to seven colours reachable by white balance,
+   * which move roughly along the blue-yellow axis, and was then documented as a
+   * general guarantee. HSL saturation can push any hue arbitrarily far, and the
+   * guarantee did not survive contact with it.
+   *
+   * That is the occupancy failure one level up — applied to a test's *input
+   * space* rather than to a parameter's domain. The same question ("does this
+   * sample cover where the data actually is?") had already been asked three times
+   * about parameters, and not once about the colours a test feeds itself.
+   */
+  const sweep = (): {
+    worstCompressed: number
+    worstClipped: number
+    wins: number
+    total: number
+  } => {
+    const hueOf = (rgb: Vec3): number => labHueAngle(linearSrgbToLab(rgb))
+    const chromaOf = (rgb: Vec3): number => labChroma(linearSrgbToLab(rgb))
+    let worstCompressed = 0
+    let worstClipped = 0
+    let wins = 0
+    let total = 0
+    for (let r = -0.6; r <= 2.0; r += 0.2) {
+      for (let g = -0.6; g <= 2.0; g += 0.2) {
+        for (let b = -0.6; b <= 2.0; b += 0.2) {
+          const rgb: Vec3 = [r, g, b]
+          if (Math.max(r, g, b) <= 0) continue
+          // A chroma floor before any angle, as everywhere else in this suite.
+          if (chromaOf(rgb) < 5) continue
+          const compressed = gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)
+          if (chromaOf(compressed) < 5) continue
+          const clipped: Vec3 = [
+            Math.min(1, Math.max(0, r)),
+            Math.min(1, Math.max(0, g)),
+            Math.min(1, Math.max(0, b)),
+          ]
+          const shift = Math.abs(hueDifference(hueOf(compressed), hueOf(rgb)))
+          const clippedShift =
+            chromaOf(clipped) < 5 ? 0 : Math.abs(hueDifference(hueOf(clipped), hueOf(rgb)))
+          total++
+          if (shift <= clippedShift) wins++
+          worstCompressed = Math.max(worstCompressed, shift)
+          worstClipped = Math.max(worstClipped, clippedShift)
+        }
+      }
+    }
+    return { worstCompressed, worstClipped, wins, total }
+  }
+
+  it('has a worst case, and it is better than clipping s worst case', () => {
+    const { worstCompressed, worstClipped, total } = sweep()
+    expect(total).toBeGreaterThan(2000)
+    // Measured at 63.0 and 91.4 on a denser sweep. Stated as a bound rather than
+    // as an exact figure so the grid spacing here is not load-bearing.
+    expect(worstCompressed, 'compressed worst case').toBeLessThan(70)
+    expect(worstCompressed).toBeLessThan(worstClipped)
+  })
+
+  it('is better than clipping most of the time, and not always', () => {
+    // The honest form of the claim that used to be universal. Both halves are
+    // asserted: if it became universal the comment above would be describing a
+    // build that no longer exists, and if it dropped below a majority the
+    // operator would no longer be earning its place.
+    const { wins, total } = sweep()
+    expect(wins / total, 'share where compression is at least as good').toBeGreaterThan(0.7)
+    expect(wins).toBeLessThan(total)
+  })
+
+  it('is strongly hue-dependent, which is what the failures actually are', () => {
+    // The brief describing this work called the failures unpredictable. They are
+    // not: the shift is a smooth, strong function of hue angle, peaking near red
+    // and falling to almost nothing near cyan. Measured on a hue sweep at fixed
+    // chroma: 28.9 degrees at 0, 0.6 at 150, 18.0 at 255.
+    const hueOf = (rgb: Vec3): number => labHueAngle(linearSrgbToLab(rgb))
+    const worstAt = (hueDegrees: number): number => {
+      const a = (hueDegrees * Math.PI) / 180
+      let worst = 0
+      for (let saturation = 1.2; saturation <= 3; saturation += 0.15) {
+        const base = [
+          0.5 + 0.4 * Math.cos(a),
+          0.5 + 0.4 * Math.cos(a - 2.0944),
+          0.5 + 0.4 * Math.cos(a + 2.0944),
+        ]
+        const grey = (base[0]! + base[1]! + base[2]!) / 3
+        const rgb = base.map((v) => grey + (v - grey) * saturation) as unknown as Vec3
+        if (labChroma(linearSrgbToLab(rgb)) < 5) continue
+        const out = gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)
+        if (labChroma(linearSrgbToLab(out)) < 5) continue
+        worst = Math.max(worst, Math.abs(hueDifference(hueOf(out), hueOf(rgb))))
+      }
+      return worst
+    }
+    expect(worstAt(0), 'red').toBeGreaterThan(20)
+    expect(worstAt(150), 'cyan').toBeLessThan(3)
+    expect(worstAt(0)).toBeGreaterThan(worstAt(150) * 5)
   })
 })

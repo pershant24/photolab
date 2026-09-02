@@ -275,10 +275,32 @@ export function toneMapRgb(rgb: Vec3, knee: number): Vec3 {
  *     out = achromatic + s * (rgb - achromatic)
  *
  * Every channel moves toward the achromatic value in the same proportion, so the
- * chroma vector keeps its direction exactly and only its length changes. Hue is
- * therefore preserved to floating point, not approximately, and what the
- * operator does is reduce saturation — which is what gamut mapping is. On the
- * same colour it holds 97.9 degrees exactly.
+ * chroma vector keeps its direction **exactly** — the cosine between the chroma
+ * vectors before and after is 1 to floating point — and only its length changes.
+ * What the operator does is reduce saturation, which is what gamut mapping is.
+ *
+ * # That is not the same as preserving perceptual hue, and this comment used to
+ * # claim it was
+ *
+ * An earlier version of this note said hue was "preserved to floating point" and
+ * cited a colour holding its CIELAB angle exactly. That is false, and measurably
+ * so: `[0.2, 1.1, -0.35]` moves **17.1 degrees** in CIELAB under this operator.
+ *
+ * The two claims are different. Preserving the chroma vector's direction in
+ * *linear sRGB* is exact and is what the maths gives. CIELAB hue is a nonlinear
+ * function of the same values, and a straight line toward the achromatic point in
+ * linear RGB is not a constant-hue line in CIELAB — the deviation is the Abney
+ * effect, and it is real rather than an artifact of the metric.
+ *
+ * Measured over a dense sweep of everything the pipeline can hand this function,
+ * negatives and values above one included:
+ *
+ *   worst compressed CIELAB hue shift    63.0 degrees
+ *   worst clipped CIELAB hue shift       91.4 degrees
+ *   compression at least as good as clipping on 79.8% of samples
+ *
+ * So compression has the better worst case and is better most of the time, and it
+ * is **not** uniformly better. `tests/unit/display.test.ts` states it that way.
  *
  * `s` comes from the same shoulder as the tone map, applied to the *largest*
  * channel distance:
