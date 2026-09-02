@@ -18,15 +18,17 @@
 
 import type { JSX } from 'react'
 
-import type { CurveParameter, ScalarParameter } from '../../core/state/editState'
+import type { CurveParameter, ScalarParameter, VectorParameter } from '../../core/state/editState'
 import type { ParameterDescriptor } from '../../core/state/parameterKinds'
 import { CurveEditor } from '../CurveEditor'
 import { ParameterSlider } from '../ParameterSlider'
+import { VectorControl } from '../VectorControl'
 
 /** Every kind this build can draw. Keyed by the same string the core registry uses. */
 const CONTROLS: Record<string, (descriptor: ParameterDescriptor) => JSX.Element | null> = {
   scalar: (descriptor) => <ParameterSlider descriptor={descriptor as ScalarParameter} />,
   curve: (descriptor) => <CurveEditor descriptor={descriptor as CurveParameter} />,
+  vector: (descriptor) => <VectorControl descriptor={descriptor as VectorParameter} />,
 }
 
 /** The kinds with a control, for the coverage assertion. */

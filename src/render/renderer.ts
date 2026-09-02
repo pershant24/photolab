@@ -25,6 +25,7 @@ import { createCurvePass } from './passes/curve'
 import { createFilmCurvesPass } from './passes/filmCurves'
 import { HALATION_PASSES } from './passes/halation'
 import { grainPass } from './passes/grain'
+import { wheelsPass } from './passes/wheels'
 import { displayPass } from './passes/display'
 import type { CurvePass } from './passes/curve'
 import type { FilmCurvesPass } from './passes/filmCurves'
@@ -201,6 +202,8 @@ export class Renderer {
       // asserting something rather than restating the array.
       displayPass,
       this.#curvePass,
+      // After the tone curve, within the grade stage.
+      wheelsPass,
       contrastPass,
       // Halation before the curves, within the film stage. Registration order
       // decides inside a stage, and this one is physical: halation adds light to

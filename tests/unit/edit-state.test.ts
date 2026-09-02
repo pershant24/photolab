@@ -4,6 +4,7 @@ import {
   DEFAULT_EDIT_STATE,
   CURVE_PARAMETERS,
   EDIT_PARAMETERS,
+  PARAMETERS,
   clampParameter,
   isIdentityCurve,
   editStatesEqual,
@@ -43,16 +44,12 @@ describe('EditState', () => {
     // The defaults are written out so the type checker verifies coverage, and
     // the table is written out so the interface has ranges. This is the check
     // that the two independent statements agree.
-    // The union of both tables, because there are two kinds of parameter and
-    // they are deliberately kept in separate tables rather than one with a type
-    // discriminant. This is the assertion that stops a third kind being added
-    // without a table: a field with no descriptor has no interface, no
-    // validation and no place in a preset merge.
+    // One table now, so this is a straight comparison rather than a union that
+    // had to be extended for each new kind. The assertion is unchanged in force:
+    // a field with no descriptor has no interface, no validation and no place in
+    // a preset merge, and it would reach the shader unchecked.
     const fields = Object.keys(DEFAULT_EDIT_STATE).sort()
-    const described = [
-      ...EDIT_PARAMETERS.map((p) => p.key as string),
-      ...CURVE_PARAMETERS.map((p) => p.key as string),
-    ].sort()
+    const described = PARAMETERS.map((p) => p.key).sort()
     expect(described).toEqual(fields)
   })
 
@@ -158,8 +155,7 @@ describe('merging a preset', () => {
     // shape exists to give.
     expect(Object.keys(merged).sort()).toEqual(
       [
-        ...EDIT_PARAMETERS.map((p) => p.key as string),
-        ...CURVE_PARAMETERS.map((p) => p.key as string),
+        ...PARAMETERS.map((p) => p.key),
       ].sort(),
     )
   })

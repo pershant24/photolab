@@ -69,34 +69,44 @@ export interface CurveDescriptor extends DescriptorBase {
 }
 
 /**
- * A fixed-length triple: a colour wheel, or a split-tone tint.
+ * A fixed-length vector: a colour wheel, a split-tone tint, a set of hue bands.
  *
- * **Typed as a readonly tuple, and that is load-bearing rather than tidy.** A
+ * **Typed as a readonly array, and that is load-bearing rather than tidy.** A
  * curve is stored as `number[]`, and the curve key type is derived from
- * `EditState[K] extends number[]`. A mutable `number[]` triple would satisfy that
- * test, so wheels would silently join `CurveEditKey` and `withCurve` would accept
- * a wheel key and apply curve semantics to it. A readonly tuple is not assignable
- * to `number[]`, so the derivation excludes it and the mistake is a compile
- * error. `tests/unit/edit-state.test.ts` asserts the exclusion holds.
+ * `EditState[K] extends number[]`. A mutable array would satisfy that test, so
+ * wheels would silently join `CurveEditKey` and `withCurve` would accept a wheel
+ * key and apply curve semantics to it — sanitising a three-component wheel as
+ * interleaved control points. A readonly array is not assignable to `number[]`,
+ * so the derivation excludes it and the mistake is a compile error.
+ * `tests/unit/parameter-kinds.test.ts` asserts the exclusion holds.
+ *
+ * One kind carrying its own length rather than a `triple` kind and a `bands`
+ * kind. The two would be near-identical code, and the registry's properties —
+ * snapshot never shares, sanitise never throws — would then need asserting twice
+ * instead of once.
  */
+export type Vector = readonly number[]
+/** A vector of exactly three, for the callers that know they have one. */
 export type Triple = readonly [number, number, number]
 
-export interface TripleDescriptor extends DescriptorBase {
-  readonly kind: 'triple'
+export interface VectorDescriptor extends DescriptorBase {
+  readonly kind: 'vector'
+  /** How many components. Sanitisation rejects anything else outright. */
+  readonly length: number
   readonly min: number
   readonly max: number
   readonly step: number
-  readonly defaultValue: Triple
-  /** The triple at which this parameter does nothing. */
-  readonly identityValue: Triple
-  /** Labels for the three components, for the control and for messages. */
-  readonly components: readonly [string, string, string]
+  readonly defaultValue: Vector
+  /** The value at which this parameter does nothing. */
+  readonly identityValue: Vector
+  /** Labels for the components, for the control and for messages. */
+  readonly components: readonly string[]
 }
 
-export type ParameterDescriptor = ScalarDescriptor | CurveDescriptor | TripleDescriptor
+export type ParameterDescriptor = ScalarDescriptor | CurveDescriptor | VectorDescriptor
 
 /** The stored value of a parameter, whatever its kind. */
-export type ParameterValue = number | number[] | Triple
+export type ParameterValue = number | number[] | Vector
 
 export interface ParameterKind<D extends ParameterDescriptor, V extends ParameterValue> {
   readonly kind: D['kind']
@@ -147,21 +157,22 @@ export const scalarKind: ParameterKind<ScalarDescriptor, number> = {
   defaultOf: (descriptor) => descriptor.defaultValue,
 }
 
-export const tripleKind: ParameterKind<TripleDescriptor, Triple> = {
-  kind: 'triple',
+export const vectorKind: ParameterKind<VectorDescriptor, Vector> = {
+  kind: 'vector',
   sanitise(descriptor, incoming, fallback) {
-    if (!Array.isArray(incoming) || incoming.length !== 3) return fallback
-    const out = incoming.map((v, i) => {
+    // A wrong length is a different parameter, not a damaged one: there is no
+    // reading of four numbers as a three-component wheel that is not a guess.
+    if (!Array.isArray(incoming) || incoming.length !== descriptor.length) return fallback
+    return incoming.map((v, i) => {
       const value = finite(v)
       return value === null ? fallback[i] ?? 0 : clamp(value, descriptor.min, descriptor.max)
     })
-    return [out[0] ?? 0, out[1] ?? 0, out[2] ?? 0] as const
   },
-  // A fresh tuple, not the one handed in. See the note on `snapshot`.
-  snapshot: (value) => [value[0], value[1], value[2]] as const,
-  equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2],
-  isIdentity: (descriptor, value) => tripleKind.equals(descriptor.identityValue, value),
-  defaultOf: (descriptor) => descriptor.defaultValue,
+  // A fresh array, not the one handed in. See the note on `snapshot`.
+  snapshot: (value) => [...value],
+  equals: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
+  isIdentity: (descriptor, value) => vectorKind.equals(descriptor.identityValue, value),
+  defaultOf: (descriptor) => [...descriptor.defaultValue],
 }
 
 /**
@@ -214,7 +225,7 @@ export const curveKind: ParameterKind<CurveDescriptor, number[]> = {
 const KINDS = new Map<string, ParameterKind<never, never>>([
   [scalarKind.kind, scalarKind as unknown as ParameterKind<never, never>],
   [curveKind.kind, curveKind as unknown as ParameterKind<never, never>],
-  [tripleKind.kind, tripleKind as unknown as ParameterKind<never, never>],
+  [vectorKind.kind, vectorKind as unknown as ParameterKind<never, never>],
 ])
 
 /** Every registered kind name, for coverage assertions. */

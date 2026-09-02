@@ -11,13 +11,13 @@ import {
   sanitiseParameter,
   scalarKind,
   snapshotParameter,
-  tripleKind,
+  vectorKind,
 } from '../../src/core/state/parameterKinds'
 import type {
   CurveDescriptor,
   ParameterDescriptor,
   ScalarDescriptor,
-  TripleDescriptor,
+  VectorDescriptor,
 } from '../../src/core/state/parameterKinds'
 import { PARAMETERS } from '../../src/core/state/editState'
 
@@ -39,15 +39,23 @@ const CURVE: CurveDescriptor = {
   kind: 'curve', key: 'testCurve', label: 'Test curve',
   domain: [0, 1], defaultValue: [0, 0, 1, 1],
 }
-const TRIPLE: TripleDescriptor = {
-  kind: 'triple', key: 'testTriple', label: 'Test triple',
+const TRIPLE: VectorDescriptor = {
+  kind: 'vector', key: 'testTriple', label: 'Test triple', length: 3,
   min: -1, max: 1, step: 0.01, defaultValue: [0, 0, 0], identityValue: [0, 0, 0],
   components: ['R', 'G', 'B'],
+}
+/** A longer vector, so the length is exercised rather than assumed to be three. */
+const BANDS: VectorDescriptor = {
+  kind: 'vector', key: 'testBands', label: 'Test bands', length: 6,
+  min: -1, max: 1, step: 0.01, defaultValue: [0, 0, 0, 0, 0, 0],
+  identityValue: [0, 0, 0, 0, 0, 0],
+  components: ['R', 'Y', 'G', 'C', 'B', 'M'],
 }
 const SAMPLES: readonly { descriptor: ParameterDescriptor; value: unknown }[] = [
   { descriptor: SCALAR, value: 0.5 },
   { descriptor: CURVE, value: [0, 0, 1, 1] },
   { descriptor: TRIPLE, value: [0.1, -0.2, 0.3] as const },
+  { descriptor: BANDS, value: [0.1, -0.2, 0.3, 0, 0.5, -0.5] as const },
 ]
 
 describe('the registry', () => {
@@ -67,10 +75,10 @@ describe('the registry', () => {
   })
 
   it('has every registered kind reachable by name', () => {
-    expect([...REGISTERED_KINDS].sort()).toEqual(['curve', 'scalar', 'triple'])
+    expect([...REGISTERED_KINDS].sort()).toEqual(['curve', 'scalar', 'vector'])
     expect(scalarKind.kind).toBe('scalar')
     expect(curveKind.kind).toBe('curve')
-    expect(tripleKind.kind).toBe('triple')
+    expect(vectorKind.kind).toBe('vector')
   })
 })
 
@@ -133,11 +141,19 @@ describe('sanitise never throws and always returns something usable', () => {
     expect(sanitiseParameter(SCALAR, '1', 0.5)).toBe(0.5)
   })
 
-  it('clamps a triple component-wise and keeps its length', () => {
+  it('clamps a vector component-wise and rejects the wrong length', () => {
     expect(sanitiseParameter(TRIPLE, [5, -5, 0.25], [0, 0, 0])).toEqual([1, -1, 0.25])
+    // A wrong length is a different parameter, not a damaged one: there is no
+    // reading of two numbers as a three-component wheel that is not a guess.
     expect(sanitiseParameter(TRIPLE, [1, 2], [0, 0, 0])).toEqual([0, 0, 0])
-    // One bad component falls back for that component only, not the whole triple.
+    expect(sanitiseParameter(TRIPLE, [1, 2, 3, 4], [0, 0, 0])).toEqual([0, 0, 0])
+    // One bad component falls back for that component only, not the whole vector.
     expect(sanitiseParameter(TRIPLE, [0.5, NaN, 0.5], [0, 0.9, 0])).toEqual([0.5, 0.9, 0.5])
+    // And the same rules at a different length, from the same code.
+    expect(sanitiseParameter(BANDS, [5, 0, 0, 0, 0, -5], BANDS.defaultValue)).toEqual([
+      1, 0, 0, 0, 0, -1,
+    ])
+    expect(sanitiseParameter(BANDS, [1, 2, 3], BANDS.defaultValue)).toEqual(BANDS.defaultValue)
   })
 
   it('rejects a curve whose x values decrease, and drops duplicates', () => {

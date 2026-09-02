@@ -1,4 +1,5 @@
 import { encodeACEScct } from '../colour/transfer'
+import { WHEEL_RANGE } from '../colour/wheels'
 import {
   defaultParameter,
   parameterIsIdentity,
@@ -11,6 +12,7 @@ import type {
   ParameterDescriptor,
   ParameterValue,
   ScalarDescriptor,
+  VectorDescriptor,
 } from './parameterKinds'
 import { NEUTRAL_TEMPERATURE, NEUTRAL_TINT } from '../colour/whiteBalance'
 import { FILM_DOMAIN, IDENTITY_CHANNEL, isIdentityChannel } from '../colour/filmStock'
@@ -119,6 +121,18 @@ export interface EditState {
   readonly grainStrength: number
 
   /**
+   * The three colour wheels, as per-channel offsets in ACEScct.
+   *
+   * `readonly number[]` rather than `number[]`, which is what keeps them out of
+   * the curve key derivation — see `parameterKinds.ts`. A mutable array here
+   * would let `withCurve` accept a wheel key and sanitise three offsets as
+   * interleaved control points.
+   */
+  readonly lift: readonly number[]
+  readonly gamma: readonly number[]
+  readonly gain: readonly number[]
+
+  /**
    * Grain period, as a fraction of the source image's long edge.
    *
    * A physical size, so it is expressed against the source rather than against
@@ -145,6 +159,7 @@ export type { ParameterDescriptor, ScalarDescriptor, CurveDescriptor } from './p
  * and would otherwise have been lost to it.
  */
 export type ScalarParameter = ScalarDescriptor & { readonly key: NumericEditKey }
+export type VectorParameter = VectorDescriptor & { readonly key: VectorEditKey }
 export type CurveParameter = CurveDescriptor & { readonly key: CurveEditKey }
 
 /**
@@ -362,6 +377,9 @@ export const DEFAULT_EDIT_STATE: EditState = {
   halationRadius: 0.006,
   grainStrength: 0,
   grainSize: 0.0009,
+  lift: [0, 0, 0],
+  gamma: [0, 0, 0],
+  gain: [0, 0, 0],
 }
 
 /**
@@ -380,6 +398,72 @@ export const DEFAULT_EDIT_STATE: EditState = {
 export type CurveEditKey = {
   [K in keyof EditState]: EditState[K] extends number[] ? K : never
 }[keyof EditState]
+
+/**
+ * Keys whose value is a fixed-length vector.
+ *
+ * Note the asymmetry with {@link CurveEditKey}: a curve is a mutable `number[]`
+ * and a vector is a `readonly number[]`, so the two derivations are disjoint and
+ * a wheel key cannot reach `withCurve`.
+ */
+export type VectorEditKey = {
+  [K in keyof EditState]: EditState[K] extends number[]
+    ? never
+    : EditState[K] extends readonly number[]
+      ? K
+      : never
+}[keyof EditState]
+
+const VECTORS: readonly VectorParameter[] = [
+  {
+    kind: 'vector',
+    key: 'lift',
+    label: 'Lift (shadows)',
+    length: 3,
+    // The offset is in ACEScct, so the range is in the same units the value is.
+    // WHEEL_RANGE is a little over one stop; wheels are a trim control and a
+    // range that moves a zone further than that has already stopped looking like
+    // a photograph.
+    min: -WHEEL_RANGE,
+    max: WHEEL_RANGE,
+    step: 0.001,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'gamma',
+    label: 'Gamma (midtones)',
+    length: 3,
+    // The offset is in ACEScct, so the range is in the same units the value is.
+    // WHEEL_RANGE is a little over one stop; wheels are a trim control and a
+    // range that moves a zone further than that has already stopped looking like
+    // a photograph.
+    min: -WHEEL_RANGE,
+    max: WHEEL_RANGE,
+    step: 0.001,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'gain',
+    label: 'Gain (highlights)',
+    length: 3,
+    // The offset is in ACEScct, so the range is in the same units the value is.
+    // WHEEL_RANGE is a little over one stop; wheels are a trim control and a
+    // range that moves a zone further than that has already stopped looking like
+    // a photograph.
+    min: -WHEEL_RANGE,
+    max: WHEEL_RANGE,
+    step: 0.001,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
+]
 
 const CURVES: readonly CurveParameter[] = [
   {
@@ -403,7 +487,7 @@ const CURVES: readonly CurveParameter[] = [
  * control all follow from the row's `kind` through the registry in
  * `parameterKinds.ts`, without any consumer learning that the kind exists.
  */
-export const PARAMETERS: readonly ParameterDescriptor[] = [...SCALARS, ...CURVES]
+export const PARAMETERS: readonly ParameterDescriptor[] = [...SCALARS, ...VECTORS, ...CURVES]
 
 /**
  * Views onto {@link PARAMETERS}, derived rather than maintained.
@@ -414,6 +498,7 @@ export const PARAMETERS: readonly ParameterDescriptor[] = [...SCALARS, ...CURVES
  * the registry, and what made a third kind expensive.
  */
 export const EDIT_PARAMETERS: readonly ScalarParameter[] = SCALARS
+export const VECTOR_PARAMETERS: readonly VectorParameter[] = VECTORS
 export const CURVE_PARAMETERS: readonly CurveParameter[] = CURVES
 
 const BY_KEY = new Map<string, ParameterDescriptor>(PARAMETERS.map((p) => [p.key, p]))
