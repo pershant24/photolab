@@ -98,7 +98,7 @@ test.describe('grain is deterministic in source coordinates', () => {
    */
   async function measure(
     page: import('@playwright/test').Page,
-    mode: 'tiles-vs-whole' | 'tile-vs-tile' | 'repeat',
+    mode: 'tiles-vs-whole' | 'tiles-vs-whole-scaled' | 'tile-vs-tile' | 'repeat',
   ): Promise<{ worst: number; spread: number; samples: number }> {
     return page.evaluate<
       { worst: number; spread: number; samples: number },
@@ -128,12 +128,12 @@ test.describe('grain is deterministic in source coordinates', () => {
         view: { ...renderer.input.view, toneMap: false, gamutCompress: false },
       }
 
-      /** Render one source rect at 1:1 and read back the red channel. */
+      /** Render one source rect at `scale` buffer pixels per source pixel. */
       const renderRect = (
-        rx: number, ry: number, rw: number, rh: number,
+        rx: number, ry: number, rw: number, rh: number, scale = 1,
       ): { pixels: Float32Array; width: number; height: number } => {
-        const width = Math.round(rw)
-        const height = Math.round(rh)
+        const width = Math.round(rw * scale)
+        const height = Math.round(rh * scale)
         const target = renderer.graph.pool.acquire(width, height)
         renderer.graph.render(
           input,
@@ -160,10 +160,11 @@ test.describe('grain is deterministic in source coordinates', () => {
         rect: readonly [number, number, number, number],
         sx: number,
         sy: number,
+        scale = 1,
       ): number | null => {
-        const x = Math.round(sx - rect[0])
+        const x = Math.round((sx - rect[0]) * scale)
         // readPixels is bottom-up, so a source row maps to height - 1 - row.
-        const y = render.height - 1 - Math.round(sy - rect[1])
+        const y = render.height - 1 - Math.round((sy - rect[1]) * scale)
         if (x < 0 || y < 0 || x >= render.width || y >= render.height) return null
         return render.pixels[y * render.width + x] ?? null
       }
@@ -225,6 +226,37 @@ test.describe('grain is deterministic in source coordinates', () => {
         return { worst, spread: hi - lo, samples }
       }
 
+      if (mode === 'tiles-vs-whole-scaled') {
+        // Origin AND scale varied together, which no other tile test does.
+        //
+        // A formulation can be right whenever the origin is zero and right
+        // whenever the scale is one, and wrong when neither is — scaling the
+        // source origin by the buffer scale is exactly that shape, since a zero
+        // origin survives any factor and a unit factor changes no origin. Both
+        // existing tile tests run at 1:1 and cannot see it.
+        const SCALE = 2
+        const whole = renderRect(WHOLE[0], WHOLE[1], WHOLE[2], WHOLE[3], SCALE)
+        spreadOf(whole)
+        const tiles = [
+          [0, 0, 173, 131],
+          [173, 0, 227, 131],
+          [0, 131, 173, 169],
+          [173, 131, 227, 169],
+        ] as const
+        for (const rect of tiles) {
+          const tile = renderRect(rect[0], rect[1], rect[2], rect[3], SCALE)
+          for (let sy = rect[1]; sy < rect[1] + rect[3]; sy += 3) {
+            for (let sx = rect[0]; sx < rect[0] + rect[2]; sx += 3) {
+              const a = at(whole, WHOLE, sx, sy, SCALE)
+              const b = at(tile, rect, sx, sy, SCALE)
+              if (a === null || b === null) continue
+              note(a, b)
+            }
+          }
+        }
+        return { worst, spread: hi - lo, samples }
+      }
+
       // tile-vs-tile: two rects with DIFFERENT origins that overlap in the
       // middle. Neither is the whole frame, so a pattern that is merely
       // self-consistent per tile cannot satisfy this.
@@ -268,6 +300,19 @@ test.describe('grain is deterministic in source coordinates', () => {
 
   test('a tile computes the same grain at a source pixel as the whole frame', async ({ page }) => {
     const result = await measure(page, 'tiles-vs-whole')
+    expect(result.samples).toBeGreaterThan(10_000)
+    expect(
+      result.worst,
+      `worst disagreement ${result.worst.toExponential(2)} over ${result.samples} samples`,
+    ).toBeLessThan(CROSS_RENDER_TOLERANCE)
+  })
+
+  test('a tile at a scale other than 1:1 still matches the whole frame', async ({ page }) => {
+    // The axis extension of the degenerate-case rule: a tile test must vary every
+    // axis the parameter depends on, and for anything reading uSourceRect that
+    // includes scale, not only x and y. Every other tile test in this suite runs
+    // at 1:1, so origin and scale had never been varied together.
+    const result = await measure(page, 'tiles-vs-whole-scaled')
     expect(result.samples).toBeGreaterThan(10_000)
     expect(
       result.worst,

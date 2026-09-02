@@ -265,6 +265,82 @@ test.describe('grain amplitude tracks density', () => {
       .toBeLessThan(0.12)
   })
 
+  test('passes through the tone map untouched; it is gamut compression that acts on it', async ({ page }) => {
+    // Correcting a claim this suite previously made. Grain was measured losing
+    // between a third and three quarters of its amplitude in some regions of a
+    // photograph once the display transform was enabled, and that was written up
+    // as the tone map's shoulder compressing it.
+    //
+    // It is not the tone map. Splitting the two stages, `toneMap` alone keeps
+    // grain at 1.000 in every region measured and `gamutCompress` alone accounts
+    // for the entire effect, to three decimals. The regions affected were the
+    // saturated ones, not the bright ones — per-channel independent noise creates
+    // chroma excursions, and in an already-saturated area those land outside the
+    // display gamut and get pulled back.
+    //
+    // Asserted here on a neutral ramp, where gamut compression has nothing to do,
+    // so what is pinned is the half of the correction this fixture can see: the
+    // tone map is not the mechanism.
+    const kept = await page.evaluate<number, { edit: Record<string, number>; source: { width: number; height: number } }>(
+      ({ edit, source }) => {
+        const renderer = (window as unknown as { __photolabRenderer: RendererLike })
+          .__photolabRenderer
+        renderer.stop()
+        const gl = renderer.context.gl
+        const decodeHalf = (h: number): number => {
+          const sign = h & 0x8000 ? -1 : 1
+          const exponent = (h >> 10) & 0x1f
+          const fraction = h & 0x3ff
+          if (exponent === 0) return sign * Math.pow(2, -14) * (fraction / 1024)
+          if (exponent === 31) return fraction ? NaN : sign * Infinity
+          return sign * Math.pow(2, exponent - 15) * (1 + fraction / 1024)
+        }
+        const width = source.width
+        const height = source.height
+        const grab = (e: Record<string, number>, view: Record<string, boolean>): number[] => {
+          const target = renderer.graph.pool.acquire(width, height)
+          renderer.graph.render(
+            { ...renderer.input, edit: { ...renderer.input.edit, ...e },
+              view: { ...renderer.input.view, ...view } },
+            { resolution: [width, height] as const,
+              imageSize: [width, height] as const,
+              sourceRect: [0, 0, width, height] as const },
+            { finalTarget: target },
+          )
+          gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer as WebGLFramebuffer)
+          const raw = new Uint16Array(width * height * 4)
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.HALF_FLOAT, raw)
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+          renderer.graph.pool.release(target)
+          // The band of rows where the modulation is strong.
+          const out: number[] = []
+          const from = Math.round(height * 0.45)
+          const to = Math.round(height * 0.75)
+          for (let y = from; y < to; y++) {
+            for (let x = 0; x < width; x++) out.push(decodeHalf(raw[(y * width + x) * 4] ?? 0))
+          }
+          return out
+        }
+        const sd = (a: number[]): number => {
+          const m = a.reduce((s, v) => s + v, 0) / a.length
+          return Math.sqrt(a.reduce((s, v) => s + (v - m) * (v - m), 0) / a.length)
+        }
+        const residual = (view: Record<string, boolean>): number => {
+          const on = grab(edit, view)
+          const off = grab({ ...edit, grainStrength: 0 }, view)
+          return sd(on.map((v, i) => v - (off[i] ?? 0)))
+        }
+        const plain = residual({ toneMap: false, gamutCompress: false })
+        if (plain <= 0) return 0
+        return residual({ toneMap: true, gamutCompress: false }) / plain
+      },
+      { edit: EDIT, source: SOURCE },
+    )
+
+    expect(kept, `the tone map kept ${(100 * kept).toFixed(1)}% of the grain`)
+      .toBeGreaterThan(0.95)
+  })
+
   test('gives the three channels independent noise, not one luminance value', async ({ page }) => {
     // Correlated channels are luminance noise — what a digital sensor makes. The
     // three layers develop separately, and that is why film grain is coloured.

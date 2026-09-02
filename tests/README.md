@@ -575,6 +575,33 @@ caught it immediately, at 0.113.
 Tiles are what break the degeneracy for anything spatial, so a spatial pass
 without a tile test has not been tested.
 
+### The axis extension: vary every axis the parameter depends on
+
+Generalising that lesson: **a tile test must vary every axis the parameter
+depends on.** For grain that is x and y. For anything reading `uSourceRect` it is
+also **scale**, and a 2x2 arrangement at two scales is barely more work than two
+tiles.
+
+An audit against this found a real hole. Every tile test in the suite ran at 1:1:
+
+| Test | x | y | scale |
+|---|---|---|---|
+| `tile-overlap.spec.ts` | yes (2x2) | yes (2x2) | **no** — `SCALE = 1` |
+| `grain-determinism.spec.ts`, tiles vs whole | yes (2x2) | yes (2x2) | **no** |
+| `grain-determinism.spec.ts`, tile vs tile | yes | yes | **no** |
+| `grain-resolution.spec.ts` | **no** — origin 0 | **no** | yes |
+
+So origin and scale were never varied together, and that gap admits a specific
+shape of error: one that is an identity whenever the origin is zero *and* an
+identity whenever the scale is one. Scaling the source origin by the buffer scale
+is exactly that — a zero origin survives any factor, and a unit factor changes no
+origin.
+
+Watched, rather than argued. With that mutation applied, all five 1:1 tile
+assertions pass, `grain-resolution` passes, `tile-overlap` passes and
+`two-resolution` passes; the new scaled-tile test fails at **0.118** against a
+4.9e-4 tolerance. It is the only test in the suite that can see it.
+
 ## The soft-edge metric rule
 
 **A metric for a soft-edged effect must integrate the soft edge**, or it measures
@@ -586,6 +613,23 @@ while the render reaches **38 levels out of 255** on the brightest folds of a
 shirt. The shader's shoulder spans `[t, t·√2]`, so the population that
 contributes is a window and not a point, and the smoothstep-weighted version
 reports it correctly.
+
+### A near-miss worth knowing about before you check the amplitude profile
+
+The measured amplitude profile appeared to peak at **+1.28 stops** rather than at
+middle grey, because the readback was display-encoded and was being read as
+linear. A true middle grey read that way lands at **+1.32 stops**.
+
+Those two numbers agree to within the resolution of the measurement, so the
+artifact looked like a confirmation of itself: a peak had been found, close to
+where an incorrect derivation said one should be, and there was every reason to
+stop. What broke it was that the profile also collapsed to zero below −0.6 stops,
+which no modulation with a four-stop toe can do.
+
+The next person to check this will hit the same coincidence. `profile()` in
+`tests/render/grain.spec.ts` linearises before reading anything as an exposure,
+and the comment there says why; do not remove it because the numbers look
+plausible without it.
 
 The same rule applies to grain, where the metric had to change twice. Grain has
 no hard edge at all, so a pointwise comparison against a TypeScript reference
@@ -637,7 +681,7 @@ value. The bar sits in a gap rather than on a slope.
 Grain residual — the difference the pass makes, pixel by pixel, which removes the
 picture — across twenty regions of a 6000px photograph, sorted by level:
 
-| mean (encoded) | grain | after tone map |
+| mean (encoded) | grain | after the display transform |
 |---|---|---|
 | 0.153 | 2.5e-3 | 2.5e-3 |
 | 0.192 | **5.2e-2** | 1.4e-2 |
@@ -650,11 +694,39 @@ picture — across twenty regions of a 6000px photograph, sorted by level:
   roughly twenty times more grain in the low midtones than in the darkest or
   brightest regions. A uniform overlay would give one number down the column.
 - **Present in the midtones, gone in deep shadow and blown highlight**, as above.
-- **The tone map's shoulder does eat some of it**, but only where it is
-  compressing: the strongest midtone regions drop by about two thirds, from
-  5.2e-2 to 1.4e-2, while regions the shoulder is not acting on are unchanged to
-  three figures. That is the tone map doing its job rather than grain being
-  fragile — the same compression applies to the picture around it.
+- **The display transform attenuates it in places — and the mechanism is not the
+  one first reported.** This was originally written up as the tone map's shoulder
+  compressing grain where it compresses everything, which was a causal claim
+  resting on a correlational measurement. It is wrong.
+
+  Splitting the two display stages settles it. `toneMap` alone keeps grain at
+  **1.000 in every region measured**; `gamutCompress` alone accounts for the whole
+  effect, matching the combined figure to three decimals:
+
+  | mean | both | tone map only | gamut only |
+  |---|---|---|---|
+  | 0.192 | 0.262 | **1.000** | 0.262 |
+  | 0.240 | 0.368 | **1.000** | 0.368 |
+  | 0.565 | 0.385 | **1.000** | 0.385 |
+  | 0.672 | 0.535 | **1.000** | 0.535 |
+  | 0.884 | 1.000 | 1.000 | 1.000 |
+
+  The affected regions are the **saturated** ones, not the bright ones — the
+  original reading correlated the attenuation with level because the regions that
+  showed it happened to be a blue banner and a magenta one. Per-channel
+  independent noise creates chroma excursions, and in an already-saturated area
+  those fall outside the display gamut and are pulled back.
+
+  This is defensible behaviour rather than a defect: chroma the display cannot
+  show is chroma the display cannot show. But it means grain visibly weakens on
+  saturated colour, which emulsion does not do, and it is recorded here as a
+  known consequence rather than as a decision anyone made.
+
+  The corroborating check that broke the original claim: a non-grain signal of
+  similar amplitude in the same regions is kept at 1.0 to 1.75 where grain is
+  kept at 0.26 to 0.65. Grain was being attenuated far more than surrounding
+  detail, which is exactly what "the tone map is doing its job" predicts should
+  not happen.
 - **It is colour grain.** Visible directly at full resolution as red and blue
   speckle rather than grey, and confirmed by the rank statistic above.
 
