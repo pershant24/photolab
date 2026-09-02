@@ -89,6 +89,28 @@ const NOMINAL_SOURCE_LONG_EDGE = 4096
  * invariant says resolution does not change the image. Output stays a pure
  * function of the inputs; only how densely it is sampled moves.
  */
+/**
+ * The source region the inspector shows.
+ *
+ * A buffer-sized rect in source pixels, centred on `centre`, clamped to lie
+ * inside the image. Clamping the rect rather than the centre means panning to a
+ * corner stops at the edge instead of showing a band of nothing, and a region
+ * larger than the image collapses to the whole image rather than going negative.
+ */
+export function inspectorRect(
+  centre: readonly [number, number],
+  bufferWidth: number,
+  bufferHeight: number,
+  sourceWidth: number,
+  sourceHeight: number,
+): readonly [number, number, number, number] {
+  const width = Math.min(bufferWidth, sourceWidth)
+  const height = Math.min(bufferHeight, sourceHeight)
+  const x = Math.min(sourceWidth - width, Math.max(0, Math.round((centre[0] ?? 0.5) * sourceWidth - width / 2)))
+  const y = Math.min(sourceHeight - height, Math.max(0, Math.round((centre[1] ?? 0.5) * sourceHeight - height / 2)))
+  return [x, y, width, height]
+}
+
 export const DRAG_PROXY_SCALE = 0.5
 
 /**
@@ -305,7 +327,16 @@ export class Renderer {
       availablePixels[1],
     )
 
-    const scale = this.#interacting ? DRAG_PROXY_SCALE : 1
+    // The inspector is exempt from the drag proxy, and this is the one place the
+    // exemption lives.
+    //
+    // Halving the buffer is what the proxy does, and the inspector exists to show
+    // one source pixel per buffer pixel — so engaging it there would replace the
+    // only thing the view is for with the thing the user opened it to escape. The
+    // cost argument does not apply either: an inspector frame renders a
+    // canvas-sized region whatever the source measures, so it is already the
+    // cheapest view in the application and does not grow with the image.
+    const scale = this.#interacting && !this.inspecting ? DRAG_PROXY_SCALE : 1
     const width = Math.max(1, Math.round(displayWidth * scale))
     const height = Math.max(1, Math.round(displayHeight * scale))
 
@@ -461,6 +492,16 @@ export class Renderer {
    * short edge follows the viewport. That keeps buffer-to-source scaling
    * isotropic, which the graph asserts.
    */
+  /** The current viewing settings. Read-only; change them through `setView`. */
+  get view(): ViewState {
+    return this.#view
+  }
+
+  /** Whether the view is currently showing source pixels one for one. */
+  get inspecting(): boolean {
+    return this.#view.inspect && this.#source.kind === 'image'
+  }
+
   passContext(): PassContext {
     const canvas = this.#context.canvas
     const width = Math.max(1, canvas.width)
@@ -471,7 +512,9 @@ export class Renderer {
       return {
         resolution: [width, height],
         imageSize: [sourceWidth, sourceHeight],
-        sourceRect: [0, 0, sourceWidth, sourceHeight],
+        sourceRect: this.#view.inspect
+          ? inspectorRect(this.#view.inspectCentre, width, height, sourceWidth, sourceHeight)
+          : [0, 0, sourceWidth, sourceHeight],
       }
     }
 

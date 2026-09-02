@@ -88,6 +88,36 @@ export interface ViewState {
    * photograph and belongs in undo and in presets.
    */
   readonly gamutThreshold: number
+
+  /**
+   * The 1:1 inspector: render a canvas-sized region of the source at one buffer
+   * pixel per source pixel, instead of the whole image scaled to fit.
+   *
+   * This is a **viewing** setting and not an edit, so it lives here: it changes
+   * which pixels are on screen and nothing about the photograph. Undo does not
+   * record it and a preset cannot carry it.
+   *
+   * It exists because grain is otherwise a parameter that cannot be evaluated.
+   * At the default size on a large source the proxy cannot represent the period
+   * at all and correctly fades it to nothing, so the user sets a number, sees no
+   * change, and finds out on export. The same applies to halation at small radii
+   * and to anything else with fine spatial structure.
+   *
+   * Deliberately *not* a second render path. It changes `uSourceRect` and nothing
+   * else, so the inspector runs the identical pass chain over a different region
+   * — which is also why it is worth having as a test fixture: every spatial
+   * parameter is exercised at a non-zero source origin, which is the
+   * non-degenerate case.
+   */
+  readonly inspect: boolean
+
+  /**
+   * Where the inspector is looking, as a fraction of the source in each axis.
+   *
+   * Normalised rather than in pixels so it survives loading a different image,
+   * and clamped when it is turned into a rect rather than when it is set.
+   */
+  readonly inspectCentre: readonly [number, number]
 }
 
 export const DEFAULT_VIEW_STATE: ViewState = {
@@ -95,6 +125,8 @@ export const DEFAULT_VIEW_STATE: ViewState = {
   toneMap: true,
   gamutCompress: true,
   gamutThreshold: GAMUT_COMPRESS_THRESHOLD,
+  inspect: false,
+  inspectCentre: [0.5, 0.5],
 }
 
 /**

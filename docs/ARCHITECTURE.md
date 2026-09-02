@@ -261,10 +261,19 @@ asserts the invariant above the limit and measures where the limit is, and does
 coarsening the export's grain until the preview could represent it, which is the
 preview dictating the picture.
 
-The consequence for a user is real and not yet addressed: **grain cannot be
-judged in the preview at the default size.** The fix is a 1:1 inspector, which
-does not exist yet; it is recorded here so it is a known gap rather than a
-surprise.
+The consequence for a user is real and is addressed by the **1:1 inspector**: a
+canvas-sized region of the source rendered at one buffer pixel per source pixel,
+panned with a drag. It is a change to `uSourceRect` and nothing else, so it runs
+the identical pass chain over a different region rather than being a second
+render path — which also makes it a test fixture, since it exercises every
+spatial parameter at a non-zero source origin.
+
+The inspector is exempt from the drag proxy. The proxy halves the drawing buffer,
+and the inspector exists to show one source pixel per buffer pixel, so engaging
+it there would replace the only thing the view is for. The cost argument does not
+apply either: an inspector frame renders a canvas-sized region whatever the
+source measures, so it is the cheapest view in the application and does not grow
+with the image.
 
 **Every spatial parameter is normalised against image dimensions.** Grain size,
 blur radius, aberration offset, vignette falloff. A radius expressed in pixels

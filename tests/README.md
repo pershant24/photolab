@@ -790,3 +790,62 @@ So the rule is split:
 What remains in the browser test is only what is deterministic on any machine: a
 stalled gesture engages, a stalled *non*-gesture does not, and `mode: 'never'`
 refuses regardless.
+
+## The 1:1 inspector
+
+A canvas-sized region of the source rendered at one buffer pixel per source
+pixel. It exists because grain was a parameter that could not be evaluated: at
+the default size on a large source the proxy correctly fades it to nothing, so
+the user set a number, saw no change, and found out on export.
+
+Implemented as a change to `uSourceRect` and nothing else, which is what makes it
+worth having twice over. As a feature it shows fine spatial structure; as a
+fixture it puts every spatial parameter at a **non-zero source origin**, which is
+the non-degenerate case.
+
+Four assertions, and they are different questions:
+
+| Assertion | What it pins | Mutation watched |
+|---|---|---|
+| The region is buffer-sized and tracks the centre | the rect derivation | centre ignored — fails |
+| Its render equals a direct render of the rect it reports | `passContext()`, which no other test reaches | (covered by the unit test below) |
+| Main view and inspector agree at different scales | origin **and** scale varied at once, the Part A gap | — |
+| It is exempt from the drag proxy | the exemption | exemption removed — fails at 300 vs 600 |
+
+`inspectorRect` is unit-tested separately, including that it clamps the *rect*
+rather than the centre — clamping the centre leaves the region hanging off the
+edge and the view shows a band of nothing. Removing the half-buffer offset fails
+there and **not** in the browser tests, which is the right division: the browser
+tests compare the render against the rect the renderer reports, so a consistently
+wrong rect is consistent.
+
+### What grain at the default size actually looks like
+
+Never evaluated before this. Measured on the 6000px photograph, in a midtone.
+
+**It is fine, coloured, and about right.** At strength 0.6 the residual is 2.2
+levels out of 255 with a correlation length of 3 pixels, which reads as emulsion
+rather than as noise. 0.3 is subtle, 1.0 is heavy but not obviously wrong.
+
+Two things the inspector was needed to see:
+
+- **Apparent strength falls sharply as size rises, though the amplitude does
+  not.** Measured across the size slider: residual 2.25, 2.20, 2.23, 2.27 levels
+  at periods of 3, 5.4, 9 and 18 source pixels, with correlation lengths of 2, 3,
+  5 and 10 pixels. The amplitude is flat and only the spatial frequency moves —
+  exactly as designed — but a fixed amplitude at low frequency is far less
+  salient and reads as part of the picture. **Size and strength are not
+  perceptually independent controls**, and the size slider behaves like a second
+  strength slider in the wrong direction. Recorded, not fixed.
+- **There is no lattice artifact, despite appearances.** At strength 1.0 the
+  magnified strip looked to have a regular diagonal cross-hatch, which would have
+  been the value-noise grid showing through. It does not exist: the
+  autocorrelation is 0.918 along x against 0.919 along y, the diagonal matches
+  the anti-diagonal, and there is no secondary peak at the 5.4-pixel lattice
+  period or its multiples. The pattern was produced by **my own
+  nearest-neighbour magnification** when building the comparison strip.
+
+  Worth stating as a method note: magnifying a fine stochastic texture with
+  nearest-neighbour interpolation invents structure that is not in the render.
+  Measure the autocorrelation before believing a pattern seen in a zoomed
+  screenshot.

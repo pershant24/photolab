@@ -32,6 +32,7 @@ export function Viewport() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [imageLabel, setImageLabel] = useState<string | null>(null)
+  const [inspecting, setInspecting] = useState(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -144,6 +145,43 @@ export function Viewport() {
     }
   }, [])
 
+  /**
+   * Panning is a pointer drag on the canvas while the inspector is open.
+   *
+   * One source pixel per buffer pixel means a pointer moved by n device pixels
+   * should move the region by n source pixels, in the opposite direction — the
+   * picture follows the finger. The canvas is sized in CSS pixels and drawn in
+   * device pixels, so the ratio between the two is what turns one into the other.
+   */
+  const panFrom = useRef<{ x: number; y: number; centre: readonly [number, number] } | null>(null)
+
+  const beginPan = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const renderer = sessionRef.current?.renderer
+    if (!renderer?.inspecting) return
+    panFrom.current = { x: event.clientX, y: event.clientY, centre: renderer.view.inspectCentre }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const pan = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const renderer = sessionRef.current?.renderer
+    const from = panFrom.current
+    if (!renderer || !from) return
+    const source = renderer.source
+    if (source.kind !== 'image') return
+    const canvas = renderer.context.canvas
+    const ratio = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : 1
+    renderer.setView({
+      inspectCentre: [
+        from.centre[0] - ((event.clientX - from.x) * ratio) / source.sourceWidth,
+        from.centre[1] - ((event.clientY - from.y) * ratio) / source.sourceHeight,
+      ],
+    })
+  }, [])
+
+  const endPan = useCallback(() => {
+    panFrom.current = null
+  }, [])
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-3 border-b border-hairline px-4 py-2">
@@ -161,13 +199,44 @@ export function Viewport() {
             }}
           />
         </label>
+        <button
+          type="button"
+          data-testid="inspect-toggle"
+          aria-pressed={inspecting}
+          onClick={() => {
+            const renderer = sessionRef.current?.renderer
+            if (!renderer) return
+            renderer.setView({ inspect: !renderer.view.inspect })
+            setInspecting(renderer.view.inspect)
+          }}
+          className={`rounded border border-hairline px-2.5 py-1 text-xs ${
+            inspecting ? 'bg-surface-raised text-ink' : 'text-ink-dim'
+          }`}
+        >
+          1:1
+        </button>
+
         <span className="truncate text-xs text-ink-dim" data-testid="image-label">
           {loading ? 'Decoding…' : (imageLabel ?? 'Test pattern')}
         </span>
+        {inspecting && (
+          <span className="text-xs text-ink-dim" data-testid="inspect-hint">
+            Actual pixels — drag to pan
+          </span>
+        )}
       </div>
 
       <div ref={containerRef} className="relative flex min-h-0 flex-1 items-center justify-center">
-        <canvas ref={canvasRef} data-testid="viewport-canvas" aria-label="Render output" />
+        <canvas
+          ref={canvasRef}
+          data-testid="viewport-canvas"
+          aria-label="Render output"
+          className={inspecting ? 'cursor-grab touch-none' : undefined}
+          onPointerDown={beginPan}
+          onPointerMove={pan}
+          onPointerUp={endPan}
+          onPointerCancel={endPan}
+        />
 
         {status.kind === 'failed' && (
           <div
