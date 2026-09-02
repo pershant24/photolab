@@ -203,12 +203,25 @@ export class Renderer {
       // Deliberately listed out of order here so that the ordering test is
       // asserting something rather than restating the array.
       displayPass,
+      // The grade stage, in registration order: tonal shaping first, colour trim
+      // after.
+      //
+      // Contrast used to run LAST, which put the two tonal controls on opposite
+      // sides of the three colour controls. That is incoherent on its own, and it
+      // had a measurable cost: contrast is a slope about grey in ACEScct and the
+      // wheels add offsets in the same space, so a later contrast scaled every
+      // wheel exactly in proportion — a lift set at 0.04 became 0.024 at contrast
+      // 0.6 and 0.064 at 1.6. A colourist who set a lift and then raised contrast
+      // found the lift stronger than they left it, which is precisely the fussy
+      // interaction a grade stage should not have. It also moved middle grey away
+      // from the pivot contrast was about to use.
+      //
+      // Shaping tone and then trimming colour is also the order people work in.
       this.#curvePass,
-      // After the tone curve, within the grade stage.
+      contrastPass,
       wheelsPass,
       hslPass,
       splitTonePass,
-      contrastPass,
       // Halation before the curves, within the film stage. Registration order
       // decides inside a stage, and this one is physical: halation adds light to
       // the emulsion, so it happens before the curves turn exposure into

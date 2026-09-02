@@ -849,3 +849,83 @@ Two things the inspector was needed to see:
   nearest-neighbour interpolation invents structure that is not in the render.
   Measure the autocorrelation before believing a pattern seen in a zoomed
   screenshot.
+
+## The grade stage
+
+Five passes on the same data — tone curve, contrast, wheels, HSL, split toning —
+and the interactions between them are what makes a set of grading tools feel
+coherent or fussy.
+
+### Contrast moved, because the ordering was incoherent
+
+Contrast ran **last**, which put the two tonal controls on opposite sides of the
+three colour controls. That is hard to defend on its own, and it had a measured
+cost. Contrast is a slope about grey in ACEScct and the wheels add offsets in the
+same space, so a later contrast scaled every wheel exactly in proportion:
+
+| contrast | a lift set to 0.04 became | after the reorder |
+|---|---|---|
+| 0.60 | 0.024 — **60%** of what was set | 0.033 (82%) |
+| 1.00 | 0.040 (100%) | 0.040 (100%) |
+| 1.60 | 0.064 — **160%** of what was set | 0.040 (100%) |
+
+A colourist who set a lift and then raised contrast found the lift stronger than
+they left it. It also moved middle grey away from the pivot contrast was about to
+use — a lift of 0.04 displaced grey by 0.0104.
+
+Contrast now runs directly after the tone curve: tonal shaping first, colour trim
+after, which is also the order people work in. The residual 82% at contrast 0.6
+is a second-order effect — contrast moves the value into a different part of the
+lift zone — rather than proportional scaling.
+
+### What composes cleanly
+
+**Wheels and split toning add exactly.** Both are ACEScct offsets, so a wheel
+contributing 0.0262 and a split tone contributing 0.0300 give 0.0562 together —
+the sum, to the last digit. They do not fight, and a user can reach the same look
+by either route.
+
+That predictability has a cost worth naming: **warmth stacks silently.** In the
+combined look, a warm film stock, a warm gain wheel and a warm highlight tint all
+push the same direction and compound, and nothing in the interface says the
+warmth has been applied three times.
+
+### What the photographs show
+
+- **The wheels read as a grade rather than a cast.** A cool lift and warm gain
+  give a clear teal-and-orange trim on the lit interior: the wall warms, the
+  shadows in the audience cool, and the blues stay blue.
+- **Lift dominates a low-key frame, exactly as measured.** On the night beach the
+  sky goes visibly blue from the lift's blue offset — that vast near-black area
+  is where lift owns 57% of the frame, which is what the occupancy integral said
+  before any pixel was rendered.
+- **Split toning and the wheels reach different places on the same picture.** On
+  the night frame the split tone's handover at grey puts nearly everything on the
+  shadow side, so it warms the sand and leaves the sky alone; the wheels' three
+  zones split the same frame differently. They are not redundant controls.
+- **HSL has little to do on a low-key frame** and a lot on a lit one, which
+  follows from there being chroma to work with in one and not the other.
+
+### The Stage 6 hue bound does not survive HSL
+
+Re-run as the brief asks. It does not hold: worst compressed hue shift is 11.3
+degrees at a tenth of the saturation range, 24.2 at a quarter and 32.6 at the
+top, against a bound of 20. The breakpoint is where `mix(luma, rgb, 1 + s)` drives
+channels negative — the colour is then outside AP1, not merely outside the
+display gamut, and the compressor was never measured there.
+
+Worse, and recorded rather than worked around: **compression is not uniformly
+better than clipping** on the colours HSL can now produce, and it does not
+correlate with how far outside the gamut the colour is.
+
+| excursion | compressed | clipped | |
+|---|---|---|---|
+| 0.036 | 0.3° | 0.5° | compression wins |
+| 0.201 | 2.1° | 12.2° | compression wins |
+| 0.212 | 11.2° | 5.3° | **compression loses** |
+| 0.355 | 32.6° | 15.7° | **compression loses** |
+
+`display.test.ts` asserts compression is never worse than clipping, over seven
+hand-picked strongly out-of-gamut colours. That test still passes and is not
+weakened. The invariant simply does not generalise to this region, and the fix is
+a decision about the compressor rather than about HSL.

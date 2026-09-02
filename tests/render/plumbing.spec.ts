@@ -79,13 +79,15 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     // Grain after the curves: its magnitude depends on the developed density,
     // which does not exist until they have produced it.
     'grain',
+    // The grade stage in order: tonal shaping first, then colour trim. Contrast
+    // sits next to the tone curve rather than after the colour controls, which
+    // is where it was and where it scaled every wheel in proportion to its own
+    // slope. See renderer.ts.
     'toneCurve',
-    // The grade stage in order: the curve shapes tone, the wheels tint by zone,
-    // HSL works by hue, split toning tints the two ends, and contrast is last.
+    'contrast',
     'wheels',
     'hsl',
     'splitTone',
-    'contrast',
     'display',
   ])
 
