@@ -156,7 +156,7 @@ test('how to upload a tile of a source larger than MAX_TEXTURE_SIZE', async ({ p
         } catch (error) {
           threw ??= error instanceof Error ? error.message : String(error)
         }
-        const got = originOf(texture as WebGLTexture, w, h)
+        const got = originOf(texture, w, h)
         const want = expected(x, y)
         if (got[0] !== want[0] || got[1] !== want[1] || got[2] !== want[2]) {
           if (wrong === 0) {
@@ -192,7 +192,7 @@ test('how to upload a tile of a source larger than MAX_TEXTURE_SIZE', async ({ p
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, bitmap)
-      const got = originOf(texture as WebGLTexture, w, h)
+      const got = originOf(texture, w, h)
       const want = expected(x, y)
       if (got[0] !== want[0] || got[1] !== want[1] || got[2] !== want[2]) {
         if (wrong2 === 0) {
