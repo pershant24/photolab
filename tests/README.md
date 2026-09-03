@@ -1087,3 +1087,94 @@ derive the level from the measurement, so orientation cancels. The third,
 `grain.spec.ts`, selected a "band near middle grey" by row index and landed
 somewhere usable only because the ramp is symmetric about its middle — both bands
 now select by measured level.
+
+## The lens stage
+
+Four passes between scene and film, in the order the glass does it: the image is
+bent, split by wavelength, scattered, and falls off toward the corners.
+
+### A tile test for a radial effect must put its seams where the radius is large
+
+The first tiling used a 2x2 split through the middle of the frame, and the
+declared overlap turned out not to matter at all — **identical disagreement at
+every overlap from 55 pixels down to 2**.
+
+Radial displacement goes as `r^3` for distortion, so a split through the centre
+puts every interior seam exactly where the effect displaces least. The largest
+displacement is at the corners, and the corners sit on the image boundary where
+every tiling clamps the same way. So the one arrangement that looks like the
+obvious tiling is the one that cannot see the failure.
+
+Moved the split outward, to 400 of 480 and 300 of 360, and the overlap became
+load-bearing:
+
+| overlap | 55 (declared) | 20 | 8 | 2 | 0 |
+|---|---|---|---|---|---|
+| worst disagreement | 4.9e-4 | 4.9e-4 | 3.4e-2 | 5.1e-2 | 6.1e-2 |
+
+The declared value is the corner bound and so is conservative for seams that are
+not at a corner. That is the right direction to be wrong in: an under-declared
+overlap is a seam in an export and an over-declared one is wasted margin.
+
+This is the third refinement of the same rule. Vary the scale, vary every axis,
+and now: **vary the position, to where the effect is actually largest.**
+
+### Two mutations, each failing exactly what depends on it
+
+| Mutation | Fails | Passes, and why |
+|---|---|---|
+| frame position read from the buffer alone | 6 of 7 | diffusion — it never asks where it is |
+| source rect dropped from the inverse mapping | 5 of 7 | diffusion and vignette — neither resamples |
+
+### The shape needed its own test
+
+Identity and tiling would both accept a `cos^2` where a `cos^4` was meant: it is
+exactly 1 at the centre either way, exactly the identity at zero either way, and
+tiles identically either way. `vignette.spec.ts` compares the rendered falloff
+against the reference across the whole frame and catches it at 2.0e-1, while
+every tiling assertion passes. It also catches a radius normalised by the
+half-width rather than by the corner, at 8.7e-2.
+
+### What the photographs show
+
+- **Distortion resamples cleanly.** No staircasing or aliasing on the hard black
+  screen bezel even at ±0.15, where displacement at the frame edge is largest.
+  Bilinear from the intermediate target's own `LINEAR` filter is enough; nearest
+  would not have been, and the crops are where it would have shown.
+- **Chromatic aberration is convincing while it is subtle.** At 0.001 it is a
+  faint warm fringe on one side of a high-contrast edge and a cool one on the
+  other, which is what a lens does. 0.003 is at the strong end of plausible. By
+  0.008 it is magenta and green banding and obviously an effect. So the useful
+  zone is the bottom third of the slider, which is what the range was chosen for.
+- **Diffusion and halation are not redundant, and the difference is obvious.**
+  Halation leaves the screen bezel black and the wall untouched and blooms only
+  genuine highlights, warmly. Diffusion lifts *everything* — the bezel's black
+  goes grey and the whole frame hazes — neutrally. They are a selective local
+  effect and a global one. Both earn their place. Diffusion's useful range is
+  also the bottom third: 0.3 already lifts blacks substantially.
+- **The vignette reads as an aperture.** It follows the frame's shape rather than
+  a circle, is flat near the centre and accelerates outward — the `cos^4`
+  signature — and does not read as a darkened overlay laid on top.
+
+### The vignette passes through the characteristic curves, measurably
+
+It runs before the film stage, so its darkening is exposure the film then
+develops. The same vignette at 0.7 under three stocks, as corner-to-centre ratio
+in linear terms:
+
+| stock | ratio |
+|---|---|
+| punchy-reversal | 0.516 |
+| warm-portrait | 0.593 |
+| muted-documentary | 0.663 |
+
+A 15% spread, in the direction the physics predicts: the contrastiest stock
+deepens the vignette most and the flattest one softens it. Correct, and confirmed
+to look correct rather than merely being defensible.
+
+### All four together
+
+At plausible settings with a stock, halation and grain, it reads as a photograph
+taken through a lens onto film rather than as a stack of effects. The barrel is
+subtle enough to be felt rather than seen, the vignette follows the frame, and
+the diffusion and halation combine into one glow rather than two.
