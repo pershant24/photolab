@@ -1302,3 +1302,104 @@ evidence of anything and quoting it as one would be worse than quoting nothing.
 the page is not cross-origin isolated, which needs COOP and COEP headers a static
 site on Pages would have to be configured for. Recorded as a limit of the
 measurement rather than papered over.
+
+## Export
+
+### What tiling being real found
+
+Every spatial pass declared a tested overlap, and every one of those tests used a
+fixture built to exercise that one pass. Export runs them all at once, and two
+coupled defects fell out immediately.
+
+**The intermediate buffers covered only the tile's own region.** The overlap
+existed solely in the source texture, so only `imageSource` could use it; every
+pass after it read a buffer that stopped at the tile edge and clamped. Tiles are
+now rendered over their expanded region and the inner region is read back from
+inside it.
+
+**`requiredOverlap` returned the maximum**, with a comment arguing each pass
+needs only its own kernel's worth of margin. That is wrong once buffers carry the
+margin, because spatial passes chain: the first corrupts a band as wide as its
+reach at the buffer edge, and the next reads that band and widens it. The sum is
+what the chain consumes. With four spatial passes enabled the maximum was 218
+source pixels and the sum is 311; the missing 93 showed as a **three-code-value
+seam** along the boundary.
+
+Summing gets separable blurs right for free — two passes each declaring the same
+reach need it twice — which is why `tile-overlap.spec.ts` now asserts twice the
+single reach.
+
+### The parity test compares against 1:1, not against the proxy
+
+The reference leg renders the whole frame at 1:1 from a full-resolution texture.
+Comparing against the actual interactive proxy would fold in the documented
+resize-at-decode deviation, fail for that reason, and say nothing about tiling.
+Grain is pinned above the representable limit per the Stage 7 decision, and the
+scope is stated in the test.
+
+| comparison | worst | samples differing |
+|---|---|---|
+| tiled export vs whole-frame 1:1, everything enabled | **1 code value** | 0 of 667,000 |
+| two tilings of a 61MP source that exceeds `MAX_TEXTURE_SIZE` | **1 code value** | 0 of 2,457,600 |
+
+The second has no whole-frame reference available — the texture cannot be
+created — so two exports at different tile sizes are compared instead: their
+seams land in different places, so agreement is evidence neither has one. Grain
+is the strictest part of it, being a hash of the source coordinate: a tiling that
+shifted it by one pixel would disagree everywhere at once.
+
+### Two of the four seam mutations needed the fixture fixed, not the code
+
+- **Halation** at a threshold nothing near the boundary exceeded produced no halo
+  to lose, so starving its overlap changed nothing.
+- **Lateral aberration** displaces only five pixels at the seam's radius, and the
+  bar placed to catch it *straddled* the boundary — so the correct sample and the
+  clamped one both landed inside it. The edge has to fall between them: for a
+  pixel just past x=2048 the red channel should read x=2042.5 and, clamped, reads
+  x=2048.
+
+Both are the seam-placement rule again, once about a tonal threshold rather than
+a radius. **An effect has to be present at the boundary for a boundary test to
+mean anything**, and "present" means its output actually differs across the few
+pixels the clamp affects.
+
+### Cost, on a real 24MP photograph
+
+6000×3999, 6 tiles, 409px overlap, via the pixel-store path:
+
+| | size | time |
+|---|---|---|
+| JPEG, quality 0.92 | 2.4 MB | 965 ms |
+| PNG | 31.4 MB | 1166 ms |
+
+Peak memory, **arithmetic rather than measured** for the reasons recorded in the
+probe section:
+
+| | 24MP | 60MP |
+|---|---|---|
+| full `ImageBitmap` | 96 MB | 246 MB |
+| output canvas | 96 MB | 246 MB |
+| resolve target, RGBA8 | 33 MB | 33 MB |
+| RGBA16F intermediates | ~131 MB | ~131 MB |
+| **total** | **~360 MB** | **~660 MB** |
+
+The **output canvas is a second full-resolution buffer**, which the Stage 3
+estimate of 240MB did not account for — it doubles at 60MP rather than being the
+whole of it.
+
+### Looking at the exports
+
+- **No seam, at any zoom.** Measured as the mean absolute difference between
+  adjacent columns at the tile boundaries against neighbouring columns: 1.029 vs
+  1.056 at x=2048, 0.776 vs 0.793 at x=4096, 0.731 vs 0.716 at y=2048. The
+  boundaries are statistically indistinguishable from anywhere else.
+- **The proxy-decode gamma deviation is measurable and not visible.** Isolated by
+  box-averaging the same source in the encoded domain and in linear light:
+  **mean 0.054 code values**, 99th percentile 1.29, worst 15.6. It is confined to
+  detail exactly as documented — **1.47 code values across the busiest 1% of the
+  frame and 0.001 across the flattest half** — and the encoded version is darker
+  on 61.7% of pixels, which is the direction the deviation predicts.
+- **The export's grain is what the inspector led me to expect.** Fine, coloured,
+  a few pixels of correlation length, reading as emulsion rather than noise. The
+  inspector was built because grain could not be judged in the preview; it turned
+  out to be an accurate predictor of the file.
