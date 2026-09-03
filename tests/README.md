@@ -1231,3 +1231,62 @@ The four refinements together:
 2. Vary every axis the parameter depends on, not just one.
 3. Vary origin and scale together, since an error can vanish when either is trivial.
 4. Place seams where the effect is strongest, not where the image divides evenly.
+
+## Getting a tile onto the GPU when the source is larger than MAX_TEXTURE_SIZE
+
+Deferred since Stage 3, blocking at export. Measured limits:
+
+| backend | `MAX_TEXTURE_SIZE` |
+|---|---|
+| SwiftShader (LLVM) | 8192 |
+| Apple M5, Metal | 16384 |
+
+A 60MP source at 3:2 is about 9600×6400, so on the software rasteriser — and on a
+meaningful share of real hardware — the full-resolution texture cannot be created
+at all. The interactive path sidesteps this by decoding to proxy size. Export
+cannot.
+
+### The answer had to be pixels, not the absence of an error
+
+A sub-rect upload that silently ignores its offsets produces a texture full of
+the wrong part of the photograph and throws nothing. So the fixture encodes its
+own coordinates — red is `x mod 256`, green `y mod 256`, blue names the
+256-pixel block — and any single pixel identifies where it came from. "Did the
+right region land" is then decidable rather than an impression.
+
+### Both work; they differ by a factor of forty
+
+20 tiles of 2048 from a 9600×6400 source, on both backends:
+
+| | correct tiles | full decode | per tile | total | full bitmap held |
+|---|---|---|---|---|---|
+| **`UNPACK_SKIP_PIXELS`/`SKIP_ROWS`/`ROW_LENGTH`** | 20/20 | 287 ms once | **6.6 ms** | 132 ms | yes, 246 MB |
+| **`createImageBitmap(blob, sx, sy, sw, sh)`** | 20/20 | — | 250 ms | 5.0 s | no |
+
+Identical on SwiftShader and on Metal, which was the cross-check worth making:
+pixel-store parameters applied to a DOM source are exactly the sort of thing that
+is specified and then implemented differently, and a probe on one backend would
+not have settled it.
+
+Option 2's per-tile cost is essentially a full decode each time — 250 ms against
+a 287 ms whole-image decode — so it re-decodes the entire file per tile rather
+than decoding the region.
+
+### The decision, and the memory it costs
+
+**Option 1 is the export path; option 2 is the fallback.** The trigger is not a
+memory heuristic but the honest condition: if `createImageBitmap` of the full
+image throws, option 1 is impossible and option 2 is what is left. Memory
+pressure is not observable but that failure is.
+
+The 240MB peak deferred at Stage 3 is real and unavoidable on this path: the
+bitmap is `9600 × 6400 × 4` = **245.76 MB**, held for the duration of the export.
+
+That figure is arithmetic, not a measurement, and the distinction matters.
+`performance.memory` reports 15 MB before and after the decode, because an
+`ImageBitmap` does not live on the JS heap — so the JS heap reading is not
+evidence of anything and quoting it as one would be worse than quoting nothing.
+`performance.measureUserAgentSpecificMemory()` does see it and refuses to run:
+the page is not cross-origin isolated, which needs COOP and COEP headers a static
+site on Pages would have to be configured for. Recorded as a limit of the
+measurement rather than papered over.
