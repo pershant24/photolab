@@ -1472,3 +1472,42 @@ through (caught in four places across three files).
 `ViewState` not persisting is asserted end to end as well: the inspector's
 position and the debug display modes are set, the page reloaded, the same image
 opened, and the edit comes back while the viewing settings do not.
+
+## Timeout headroom
+
+The 61MP export test ran 34 seconds locally, exceeded a 600 second timeout on CI,
+and **failed on two consecutive pushes before anyone noticed**, because the local
+suite was green and nothing was reading how long anything took.
+
+That is the second check in this repository's history to pass by not running. The
+first was `tsc --noEmit` at Stage 2. Both had the same shape: **the signal was
+available and nothing was looking at it.**
+
+`tests/support/headroom-reporter.ts` prints every test's duration as a fraction
+of its own timeout, warns past a quarter and **fails the run past a half**.
+
+### Why those fractions
+
+Measured, not guessed. The same CI job on this repository has taken between
+**6m13s and 19m50s** for equivalent content — a factor of three in runner speed
+alone, before any change to the suite. A test comfortable at 30% on a fast runner
+is at 90% on a slow one, which is the failure this exists to prevent. Half leaves
+a 2x margin, already thinner than the observed variance; a quarter leaves 4x,
+which is roughly where variance alone stops being survivable.
+
+The slowest tests print whether or not anything crossed a line. The thresholds
+catch drift that has gone too far; the listing is what lets someone notice a
+stage earlier.
+
+### It found something on its first full run
+
+The lens stage's "each effect on its own actually changes the frame" was at
+**27% of the default 30 second timeout** — 8 seconds for seven full-frame renders.
+At the three-times-slower end of the observed range that is 24 seconds of 30, and
+it would have started failing without anything about it having changed.
+
+Raised to 120 seconds deliberately, which is what the reporter's own message says
+to do. Nothing is now above 12%.
+
+Watched fail: with a timeout tight enough to put a passing test at 66%, the run
+exits non-zero and names the test; restored, it exits zero.

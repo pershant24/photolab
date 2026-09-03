@@ -305,6 +305,11 @@ test.describe('the lens stage under tiling', () => {
   })
 
   test('each effect on its own actually changes the frame', async ({ page }) => {
+    // Six full-frame renders plus a baseline, which is 8 seconds locally — 27% of
+    // the default 30s timeout, and this repository's CI runners have been three
+    // times slower than this machine. Raised deliberately rather than left to
+    // drift into a timeout, which is what the headroom reporter exists to catch.
+    test.setTimeout(120_000)
     // The counterpart to the identity test, and the thing that stops all of the
     // above passing because nothing runs. A pass that was never enabled would
     // satisfy every tiling assertion perfectly.

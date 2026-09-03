@@ -15,7 +15,12 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
+  // The headroom reporter runs in both, because a test drifting toward its
+  // timeout is exactly as worth knowing about locally as in CI — and locally is
+  // where it is cheap to fix.
+  reporter: process.env.CI
+    ? [['github'], ['html', { open: 'never' }], ['./tests/support/headroom-reporter.ts']]
+    : [['list'], ['./tests/support/headroom-reporter.ts']],
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
