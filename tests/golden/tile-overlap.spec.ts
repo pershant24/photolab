@@ -201,9 +201,16 @@ test.describe('tiled rendering', () => {
     const result = await compare(page, null)
 
     // The declared overlap must actually cover the kernel: radius as a fraction
-    // of the long edge, in source pixels.
-    const expected = Math.ceil(EDIT.halationRadius * SOURCE.width) + 1
-    expect(result.declaredOverlap, 'overlap is derived from the radius').toBe(expected)
+    // of the long edge, in source pixels — and TWICE, because the blur is
+    // separable and each of its two passes reads that far.
+    //
+    // This asserted the single reach until the export parity test showed that
+    // `requiredOverlap` taking a maximum was wrong. Spatial passes chain: the
+    // horizontal blur corrupts a band as wide as its reach at the buffer edge,
+    // and the vertical blur then reads that band and widens it. The sum is what
+    // the chain needs, and for a separable pair the sum is the reach twice.
+    const perPass = Math.ceil(EDIT.halationRadius * SOURCE.width) + 1
+    expect(result.declaredOverlap, 'overlap is derived from the radius').toBe(2 * perPass)
 
     expect(result.samples, 'the comparison must cover the tiles').toBeGreaterThan(1000)
     expect(result.spread, 'the frame must contain a halo to compare').toBeGreaterThan(0.05)

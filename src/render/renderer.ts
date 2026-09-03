@@ -437,6 +437,10 @@ export class Renderer {
       height: bitmap.height,
       sourceWidth,
       sourceHeight,
+      // The proxy holds the whole image, scaled. `textureRect` is about which
+      // REGION the texture covers, not at what resolution, so it is the full
+      // frame here whatever the proxy's dimensions are.
+      textureRect: [0, 0, sourceWidth, sourceHeight],
     }
     this.#dirty = true
   }

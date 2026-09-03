@@ -51,6 +51,21 @@ export type RenderSource =
       /** True source dimensions, orientation-corrected. Drives `uImageSize`. */
       readonly sourceWidth: number
       readonly sourceHeight: number
+      /**
+       * Which region of the source the bound texture actually holds, in source
+       * pixels.
+       *
+       * `[0, 0, sourceWidth, sourceHeight]` for the interactive path, where the
+       * texture is a proxy of the whole image. For an export tile it is that
+       * tile's own expanded region, and without it `imageSource.frag` would map
+       * frame coordinates into a texture that does not contain them — every tile
+       * would sample the wrong part of the photograph.
+       *
+       * Distinct from `uSourceRect`, which says what region the BUFFER covers.
+       * The two are equal only by coincidence: an export tile renders its own
+       * region from a texture holding that region plus overlap.
+       */
+      readonly textureRect: readonly [number, number, number, number]
     }
 
 /**

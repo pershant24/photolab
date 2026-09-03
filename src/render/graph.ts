@@ -158,19 +158,30 @@ export class RenderGraph {
   }
 
   /**
-   * The largest tile overlap any enabled pass needs, in source pixels.
+   * The tile overlap the enabled passes need between them, in source pixels.
    *
-   * Tiled export expands every tile by this much. The maximum rather than a sum,
-   * because passes run in sequence over the whole tile: each one needs its own
-   * kernel's worth of margin present, not the accumulation of all of them.
+   * **The sum, not the maximum.** This returned the maximum for three stages,
+   * with a comment arguing that each pass needs only its own kernel's worth of
+   * margin. That is wrong, and the export parity test is what proved it.
+   *
+   * Spatial passes chain. A tile is rendered over its expanded region, and the
+   * first spatial pass reads up to its own reach outside every pixel it writes —
+   * so near the buffer's edge it samples past the data and clamps, corrupting a
+   * band as wide as its reach. The next pass reads that band, and its own reach
+   * widens the corruption. For the tile's *inner* region to be clean, the margin
+   * has to cover every reach in the chain added together.
+   *
+   * With distortion, aberration, diffusion and halation all enabled, the maximum
+   * was 218 source pixels and the sum is 311. The 93-pixel difference showed as a
+   * three-code-value seam along the tile boundary — small, and a seam.
    */
   requiredOverlap(input: RenderInput): number {
-    let largest = 0
+    let total = 0
     for (const pass of this.#passes) {
       if (!pass.enabled(input) || !pass.overlap) continue
-      largest = Math.max(largest, pass.overlap(input))
+      total += pass.overlap(input)
     }
-    return largest
+    return total
   }
 
   /**

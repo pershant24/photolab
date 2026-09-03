@@ -11,6 +11,8 @@ uniform sampler2D uImage;
 uniform vec2 uResolution;
 uniform vec2 uImageSize;
 uniform vec4 uSourceRect;
+/** The region of the source the bound texture holds. See RenderSource. */
+uniform vec4 uTextureRect;
 
 in vec2 vTexCoord;
 out vec4 fragColour;
@@ -34,6 +36,12 @@ void main() {
     // from the wrong one. On a full-frame render the correct expression and the
     // one that reads uResolution reduce to the same thing, exactly as the two
     // uniforms did in Stage 3; only a tile separates them.
-    vec2 uv = (uSourceRect.xy + flipped * uSourceRect.zw) / uImageSize;
+    // Where this buffer texel sits in the full frame, in source pixels...
+    vec2 framePixel = uSourceRect.xy + flipped * uSourceRect.zw;
+    // ...and where that lands in a texture that may hold only part of the frame.
+    // For the interactive path uTextureRect is the whole image and this reduces
+    // exactly to framePixel / uImageSize, which is what it was before export
+    // needed the general form.
+    vec2 uv = (framePixel - uTextureRect.xy) / uTextureRect.zw;
     fragColour = vec4(texture(uImage, uv).rgb, 1.0);
 }

@@ -37,5 +37,11 @@ export const imageSourcePass: Pass = {
     gl.bindTexture(gl.TEXTURE_2D, source.texture)
     gl.uniform1i(image, 1)
     gl.activeTexture(gl.TEXTURE0)
+
+    const rect = locate('uTextureRect')
+    if (rect) {
+      const [x, y, w, h] = source.textureRect
+      gl.uniform4f(rect, x, y, w, h)
+    }
   },
 }

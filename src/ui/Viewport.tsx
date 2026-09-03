@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { FILM_STOCKS } from '../core/colour/filmStock'
 import { editorStore } from '../core/state/editorStore'
 import type { EditorStoreState } from '../core/state/editorStore'
+import { exportImage } from '../render/export'
 import { RendererUnsupportedError } from '../render/gl/context'
 import { ImageLoader, isSupersededError } from '../render/imageLoader'
 import { Renderer } from '../render/renderer'
@@ -33,6 +34,10 @@ export function Viewport() {
   const [loading, setLoading] = useState(false)
   const [imageLabel, setImageLabel] = useState<string | null>(null)
   const [inspecting, setInspecting] = useState(false)
+  const [exporting, setExporting] = useState<{ done: number; total: number } | null>(null)
+  const [exportNote, setExportNote] = useState<string | null>(null)
+  /** The file as opened. Export re-decodes it at full resolution. */
+  const sourceFile = useRef<{ blob: Blob; width: number; height: number; name: string } | null>(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -98,10 +103,12 @@ export function Viewport() {
       __photolabRenderer?: Renderer
       __photolabStore?: typeof editorStore
       __photolabFilmStocks?: typeof FILM_STOCKS
+      __photolabExport?: typeof exportImage
     }
     hooks.__photolabRenderer = renderer
     hooks.__photolabStore = editorStore
     hooks.__photolabFilmStocks = FILM_STOCKS
+    hooks.__photolabExport = exportImage
 
     return () => {
       observer.disconnect()
@@ -113,6 +120,7 @@ export function Viewport() {
       delete hooks.__photolabRenderer
       delete hooks.__photolabStore
       delete hooks.__photolabFilmStocks
+      delete hooks.__photolabExport
     }
   }, [])
 
@@ -129,6 +137,12 @@ export function Viewport() {
       // The proxy has been uploaded; the bitmap itself is no longer needed, and
       // at 2048px it is 16MB.
       decoded.bitmap.close()
+      sourceFile.current = {
+        blob: file,
+        width: decoded.sourceWidth,
+        height: decoded.sourceHeight,
+        name: file.name,
+      }
       setImageLabel(`${file.name} — ${decoded.sourceWidth}x${decoded.sourceHeight}`)
       session.renderer.renderNow({
         width: container.clientWidth,
@@ -182,6 +196,54 @@ export function Viewport() {
     panFrom.current = null
   }, [])
 
+  /**
+   * Export at full resolution and hand the file over.
+   *
+   * The renderer is stopped for the duration: the export drives the same graph,
+   * and letting the interactive loop draw between tiles would have two callers
+   * binding framebuffers on one context.
+   */
+  const runExport = useCallback(async (format: 'image/jpeg' | 'image/png') => {
+    const renderer = sessionRef.current?.renderer
+    const source = sourceFile.current
+    if (!renderer || !source) return
+    setExportNote(null)
+    setExporting({ done: 0, total: 1 })
+    renderer.stop()
+    try {
+      const result = await exportImage(
+        renderer.context,
+        renderer.graph,
+        source.blob,
+        editorStore.getState().edit,
+        renderer.view,
+        source.width,
+        source.height,
+        {
+          format,
+          onProgress: (done, total) => setExporting({ done, total }),
+        },
+      )
+      const url = URL.createObjectURL(result.blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      const stem = source.name.replace(/\.[^.]+$/, '')
+      anchor.download = `${stem}-photolab.${format === 'image/png' ? 'png' : 'jpg'}`
+      anchor.click()
+      URL.revokeObjectURL(url)
+      setExportNote(
+        `${result.width}x${result.height}, ${result.tiles} tiles, ${result.overlap}px overlap, ` +
+          `${(result.blob.size / 1e6).toFixed(1)} MB in ${(result.milliseconds / 1000).toFixed(1)}s ` +
+          `(${result.uploadPath})`,
+      )
+    } catch (error) {
+      setExportNote(error instanceof Error ? error.message : 'Export failed.')
+    } finally {
+      setExporting(null)
+      renderer.start()
+    }
+  }, [])
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-3 border-b border-hairline px-4 py-2">
@@ -216,12 +278,36 @@ export function Viewport() {
           1:1
         </button>
 
+        <button
+          type="button"
+          data-testid="export-jpeg"
+          disabled={exporting !== null}
+          onClick={() => void runExport('image/jpeg')}
+          className="rounded border border-hairline px-2.5 py-1 text-xs text-ink disabled:opacity-40"
+        >
+          {exporting ? `Exporting ${exporting.done}/${exporting.total}` : 'Export JPEG'}
+        </button>
+        <button
+          type="button"
+          data-testid="export-png"
+          disabled={exporting !== null}
+          onClick={() => void runExport('image/png')}
+          className="rounded border border-hairline px-2.5 py-1 text-xs text-ink disabled:opacity-40"
+        >
+          PNG
+        </button>
+
         <span className="truncate text-xs text-ink-dim" data-testid="image-label">
           {loading ? 'Decoding…' : (imageLabel ?? 'Test pattern')}
         </span>
         {inspecting && (
           <span className="text-xs text-ink-dim" data-testid="inspect-hint">
             Actual pixels — drag to pan
+          </span>
+        )}
+        {exportNote && (
+          <span className="truncate text-xs text-ink-dim" data-testid="export-note">
+            {exportNote}
           </span>
         )}
       </div>
