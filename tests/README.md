@@ -1403,3 +1403,64 @@ whole of it.
   a few pixels of correlation length, reading as emulsion rather than noise. The
   inspector was built because grain could not be judged in the preview; it turned
   out to be an accurate predictor of the file.
+
+## Persistence
+
+Presets already persisted. This is the rest of the session: the edit for each
+image, so reopening the application and then reopening the photograph restores
+where you were.
+
+### What identifies an image, and what is stored
+
+Name, byte length and modification time. **Not a content hash** — hashing 60MP on
+every open costs more than the feature is worth, and the three together are
+stable for the same file and different for a different one in every case that
+matters. Two distinct files agreeing on all three is possible; the consequence is
+that one photograph opens with another's edit, which is visible immediately and
+undone by one press of reset.
+
+The **patch**, not the whole state, for the same reason presets store one: a
+record written by an older build should contribute what it knows and let this
+build's defaults supply the rest rather than pinning fields it never heard of.
+
+**Source images are not stored.** They are reopened from disk. Writing every
+photograph you open into browser storage is not something the user asked for, and
+at 60MP a time it is not a small thing to do quietly.
+
+### Reopening without the source: the edit waits
+
+The edit exists and has nothing to apply to. It **waits**, keyed to its file, and
+reattaches when a file matching the key is opened.
+
+The rejected alternative is to restore the most recent edit whatever is opened
+next. That looks more helpful and is wrong on the second photograph: exposure and
+white balance are decisions about the light in *that* scene, so carrying them to
+a different file is not restoring work, it is corrupting a new photograph with an
+old one's edit. Asserted directly — opening a different image after a reload
+restores nothing.
+
+### The boundary, five stages on
+
+`EditState` is what the photograph is; `ViewState` is how you are looking at it.
+The split was drawn at Stage 4 and has since taken parameters from five stages,
+and it is exactly the sort of line that stays right while someone remembers why
+and then quietly stops, because putting a parameter on the wrong side is one line
+and nothing complains.
+
+Asserted from the registry rather than a hand-maintained list:
+
+- every parameter survives a JSON round trip, moved off its default first so the
+  trip carries something, and at both ends of its range
+- `EditState` and `ViewState` share no key
+- a viewing setting offered in a preset or a stored record is **dropped**, not
+  merged
+- the roll-off knee is on the edit side and the gamut threshold is not — the
+  asymmetry is the boundary being drawn rather than defaulted
+
+Two mutations watched: a viewing setting added to `EditState` (caught by the set
+difference and by the knee assertion), and `sanitisePatch` letting an unknown key
+through (caught in four places across three files).
+
+`ViewState` not persisting is asserted end to end as well: the inspector's
+position and the debug display modes are set, the page reloaded, the same image
+opened, and the edit comes back while the viewing settings do not.

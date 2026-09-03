@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FILM_STOCKS } from '../core/colour/filmStock'
 import { editorStore } from '../core/state/editorStore'
+import { imageKey, loadEdit, saveEdit } from '../core/state/sessionStore'
 import type { EditorStoreState } from '../core/state/editorStore'
 import { exportImage } from '../render/export'
 import { RendererUnsupportedError } from '../render/gl/context'
@@ -38,6 +39,9 @@ export function Viewport() {
   const [exportNote, setExportNote] = useState<string | null>(null)
   /** The file as opened. Export re-decodes it at full resolution. */
   const sourceFile = useRef<{ blob: Blob; width: number; height: number; name: string } | null>(null)
+  /** The key the current image's edit is stored under, or null with no image. */
+  const sessionKey = useRef<string | null>(null)
+  const [restored, setRestored] = useState(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -79,6 +83,22 @@ export function Viewport() {
     publish(editorStore.getState())
     const unsubscribeStore = editorStore.subscribe(publish)
 
+    // Persist work in progress, but not on every frame of a drag: a slider
+    // produces a store update per frame and IndexedDB is not the place to put
+    // sixty writes a second. Saved when a gesture ends and otherwise coalesced.
+    let saveTimer: number | undefined
+    const persist = (next: EditorStoreState): void => {
+      const key = sessionKey.current
+      const file = sourceFile.current
+      if (!key || !file) return
+      if (next.interactionBaseline !== null) return
+      window.clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(() => {
+        void saveEdit(key, file.name, editorStore.getState().edit)
+      }, 400)
+    }
+    const unsubscribePersist = editorStore.subscribe(persist)
+
     const unsubscribe = renderer.context.onStatusChange((next) => setContextLost(next === 'lost'))
 
     const available = (): { width: number; height: number } => ({
@@ -113,6 +133,8 @@ export function Viewport() {
     return () => {
       observer.disconnect()
       unsubscribeStore()
+      unsubscribePersist()
+      window.clearTimeout(saveTimer)
       unsubscribe()
       loader.dispose()
       renderer.dispose()
@@ -142,6 +164,19 @@ export function Viewport() {
         width: decoded.sourceWidth,
         height: decoded.sourceHeight,
         name: file.name,
+      }
+
+      // Reattach any work in progress for this exact file. Applied through the
+      // store's patch path, so it is one undoable entry rather than twenty and
+      // so it is validated on the way in like any other untrusted patch.
+      const key = imageKey(file)
+      sessionKey.current = key
+      const stored = await loadEdit(key)
+      if (stored && Object.keys(stored).length > 0) {
+        editorStore.getState().applyPatch(stored)
+        setRestored(true)
+      } else {
+        setRestored(false)
       }
       setImageLabel(`${file.name} — ${decoded.sourceWidth}x${decoded.sourceHeight}`)
       session.renderer.renderNow({
@@ -303,6 +338,11 @@ export function Viewport() {
         {inspecting && (
           <span className="text-xs text-ink-dim" data-testid="inspect-hint">
             Actual pixels — drag to pan
+          </span>
+        )}
+        {restored && (
+          <span className="text-xs text-ink-dim" data-testid="restored-note">
+            Restored your edit
           </span>
         )}
         {exportNote && (
