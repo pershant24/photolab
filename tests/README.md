@@ -1178,3 +1178,56 @@ At plausible settings with a stock, halation and grain, it reads as a photograph
 taken through a lens onto film rather than as a stack of effects. The barrel is
 subtle enough to be felt rather than seen, the vignette follows the frame, and
 the diffusion and halation combine into one glow rather than two.
+
+## A corrected test requires checking what cited it
+
+"Preserved to floating point" survived in prose after the measurement that
+licensed it was found to support only half of a merged claim. The code was
+corrected; the sentence citing it was not.
+
+That is a pattern rather than an instance, and it has a specific shape: **a claim
+outlives the test that justified it, because correcting a test changes a file
+nobody greps for prose.** So when a test is found circular, rescoped or
+overturned, the work is not finished until what cited it has been checked.
+
+Swept for it. Three findings, one of them a real defect:
+
+| Location | Claim | Status |
+|---|---|---|
+| `COLOUR_PIPELINE.md` display transform | "without it, out-of-gamut values clip per-channel, which shifts hue" — implying compression does not | **False by implication.** Compression shifts hue too, up to 63°, and loses to clipping on 20% of the space. Corrected with the measured table. |
+| `ARCHITECTURE.md` build order | "**Lens** — vignette, chromatic aberration, diffusion, distortion" | **Backwards.** The execution order is the reverse, and the position test now asserts it. Corrected, with a note that prose cannot hold an ordering. |
+| `ARCHITECTURE.md` §11 worked example | describes the vignette as hypothetical, with parameter and file names that are not the ones that shipped | **Stale.** Marked as the recipe, with a pointer to the real files and a note that where they disagree the code is right. |
+
+The round-trip section in `SHADER_CONVENTIONS.md` was checked and is accurate: it
+describes the leg-by-leg fix rather than the round trip it replaced, which is
+what a corrected doc looks like.
+
+## The seam-placement rule
+
+The fourth refinement of the degeneracy rule, and the one that generalises
+furthest: **a tiling must place its seams where the effect is strongest, not
+where the image divides evenly.**
+
+The natural tiling of an image is a split through the middle. For a radial
+effect that is the worst possible choice, and not by a little:
+
+- Radial displacement goes as `r^3` for distortion, so a centre split puts every
+  interior seam exactly where the effect displaces least.
+- The maximum displacement is at the corners, and the corners lie on the image
+  boundary, where every tiling clamps identically and no seam can exist.
+
+So the arrangement that looks like the obvious tiling is precisely the one blind
+to the failure. Measured: identical disagreement at every overlap from 55 pixels
+down to 2 with a centre split, and a clean progression from 4.9e-4 to 6.1e-2 once
+the split moved to 400 of 480.
+
+It applies to anything with radial falloff — the vignette, both lens geometric
+passes, and any future optical effect — and it is why the export's own tiling
+tests use off-centre splits rather than a grid.
+
+The four refinements together:
+
+1. Test where the two formulations differ, not where they coincide.
+2. Vary every axis the parameter depends on, not just one.
+3. Vary origin and scale together, since an error can vanish when either is trivial.
+4. Place seams where the effect is strongest, not where the image divides evenly.

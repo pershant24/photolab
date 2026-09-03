@@ -447,7 +447,14 @@ In full in [`../tests/README.md`](../tests/README.md). The shape of it:
    decides whether the project works at all.
 2. **Tonal and colour** — curves, HSL, wheels, white balance.
 3. **Film response** — characteristic curves, halation, grain.
-4. **Lens** — vignette, chromatic aberration, diffusion, distortion.
+4. **Lens** — distortion, chromatic aberration, diffusion, vignette.
+
+   Listed here in the order they *execute*, which this line previously had
+   backwards. The build order and the execution order happen to coincide, and
+   writing one while meaning the other is exactly how the grade stage ended up
+   with contrast on the wrong side of three colour passes for two stages.
+   `tests/unit/pass-positions.test.ts` is what now holds the execution order; this
+   is prose and cannot.
 
 Lens effects are last *because* they are the cheapest and most fun, which is
 exactly why they would otherwise displace the hard part. The ordering is a guard
@@ -485,6 +492,13 @@ yet. Lens effects arrive last, per the build order above.
    expand tile bounds and avoid seams.
 
 ### Worked example: vignette
+
+**This is now built, and the names below are not the ones that shipped.** The
+recipe is kept because it is the recipe; where it disagrees with the code, the
+code is right. `src/core/colour/lens.ts`, `src/render/shaders/vignette.frag` and
+`src/render/passes/lens.ts` are the real thing, the parameter is `vignette` with
+the falloff reach a constant rather than a second slider, and the shader is a
+`.frag` rather than a `.glsl`.
 
 A `cos^4` vignette darkening toward the frame edges, with a radius and a
 falloff.

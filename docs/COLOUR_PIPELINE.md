@@ -130,9 +130,29 @@ display transfer function.
 
 Tone mapping is a deliberate, named stage rather than an implicit clip. Values
 above display white exist throughout the pipeline and must be brought down by a
-curve that preserves their ordering. Gamut compression handles the colours that
-AP1 can represent and the display cannot: without it, out-of-gamut values clip
-per-channel, which shifts hue.
+curve that preserves their ordering.
+
+Gamut compression handles the colours that AP1 can represent and the display
+cannot. **It reduces saturation along a line toward the achromatic value, which
+preserves the chroma vector's direction in linear sRGB exactly — and that is not
+the same as preserving perceptual hue.** This paragraph previously said that
+clipping shifts hue, implying compression does not. Measured over the whole
+reachable space:
+
+| | worst CIELAB hue shift |
+|---|---|
+| gamut compression | 63.0° |
+| per-channel clipping | 91.4° |
+
+Compression has the better worst case and is at least as good on 79.8% of the
+space. It is **not** uniformly better, and the cases where it loses are strongly
+hue-dependent rather than related to how far outside the gamut a colour sits.
+`src/core/colour/display.ts` carries the full reasoning and
+`tests/unit/display.test.ts` holds the bound.
+
+What compression buys that is unconditional: a smooth approach to the boundary
+rather than a hard edge, no darkening (the achromatic value is the largest
+channel and is left unmoved), and exact preservation of the chroma direction.
 
 A `none` mode is available and used by the round-trip test, where sRGB in must
 equal sRGB out through an otherwise identity pipeline. That test would be
