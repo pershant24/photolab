@@ -1254,23 +1254,30 @@ own coordinates — red is `x mod 256`, green `y mod 256`, blue names the
 256-pixel block — and any single pixel identifies where it came from. "Did the
 right region land" is then decidable rather than an impression.
 
-### Both work; they differ by a factor of forty
+### Both work, and one is an order of magnitude faster
 
-20 tiles of 2048 from a 9600×6400 source, on both backends:
+20 tiles of 2048 from a 9600×6400 source. Correctness is identical on both
+backends — **20 of 20 tiles land in the right place, both ways** — which was the
+cross-check worth making: pixel-store parameters applied to a DOM source are
+exactly the sort of thing that is specified and then implemented differently, and
+a probe on one backend would not have settled it.
 
-| | correct tiles | full decode | per tile | total | full bitmap held |
-|---|---|---|---|---|---|
-| **`UNPACK_SKIP_PIXELS`/`SKIP_ROWS`/`ROW_LENGTH`** | 20/20 | 287 ms once | **6.6 ms** | 132 ms | yes, 246 MB |
-| **`createImageBitmap(blob, sx, sy, sw, sh)`** | 20/20 | — | 250 ms | 5.0 s | no |
+| | SwiftShader | Metal | full bitmap held |
+|---|---|---|---|
+| decode once | 86 ms | 68 ms | — |
+| **pixel store**, per tile | **4.7 ms** | **9.1 ms** | yes, 246 MB |
+| **crop rectangle**, per tile | 57 ms | 68 ms | no |
 
-Identical on SwiftShader and on Metal, which was the cross-check worth making:
-pixel-store parameters applied to a DOM source are exactly the sort of thing that
-is specified and then implemented differently, and a probe on one backend would
-not have settled it.
+**The ratio depends on the file, and the first measurement overstated it.** An
+earlier run against a differently-encoded PNG of the same image measured 250 ms
+per tile for the crop path against 287 ms for a whole-image decode — a factor of
+forty rather than twelve. The crop path's cost is a decode, so it tracks whatever
+the codec and the file make a decode cost, and a single number for it would be a
+number about that file.
 
-Option 2's per-tile cost is essentially a full decode each time — 250 ms against
-a 287 ms whole-image decode — so it re-decodes the entire file per tile rather
-than decoding the region.
+What does not vary: the crop path re-decodes the whole file per tile rather than
+decoding the region, so its cost is the whole-image decode multiplied by the tile
+count, whatever that decode happens to be.
 
 ### The decision, and the memory it costs
 
@@ -1281,6 +1288,11 @@ pressure is not observable but that failure is.
 
 The 240MB peak deferred at Stage 3 is real and unavoidable on this path: the
 bitmap is `9600 × 6400 × 4` = **245.76 MB**, held for the duration of the export.
+
+The probe builds its own fixture in the page rather than reading one from disk.
+The first version read a file that existed only on the machine that wrote it, so
+it passed locally and failed in CI — a probe that needs a fixture nobody else has
+is a probe that runs nowhere else.
 
 That figure is arithmetic, not a measurement, and the distinction matters.
 `performance.memory` reports 15 MB before and after the decode, because an

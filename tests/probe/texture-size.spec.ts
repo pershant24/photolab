@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-
 import { test } from '@playwright/test'
 
 /**
@@ -22,7 +20,6 @@ import { test } from '@playwright/test'
  */
 
 const SOURCE = { width: 9600, height: 6400 }
-const HUGE = '<scratchpad>/huge.png'
 
 /** Tiles a 9600x6400 source needs at 2048, which is a realistic export tiling. */
 const TILE = 2048
@@ -32,13 +29,29 @@ test('how to upload a tile of a source larger than MAX_TEXTURE_SIZE', async ({ p
   await page.goto('/')
   await page.waitForFunction(() => '__photolabRenderer' in window)
 
-  const png = readFileSync(HUGE).toString('base64')
-  await page.evaluate((data) => {
-    const binary = atob(data)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    ;(window as unknown as { __huge: Blob }).__huge = new Blob([bytes], { type: 'image/png' })
-  }, png)
+  // Built in the page rather than read from disk. A probe that needs a fixture
+  // only one machine has is a probe that runs nowhere else — this one was, and
+  // CI said so.
+  await page.evaluate(async ({ width, height }) => {
+    const canvas = new OffscreenCanvas(width, height)
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('no 2d context')
+    // Row by row, so the whole 246MB of ImageData never exists at once.
+    const row = context.createImageData(width, 1)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = x * 4
+        row.data[i] = x % 256
+        row.data[i + 1] = y % 256
+        row.data[i + 2] = (Math.floor(x / 256) * 16 + Math.floor(y / 256)) % 256
+        row.data[i + 3] = 255
+      }
+      context.putImageData(row, 0, y)
+    }
+    ;(window as unknown as { __huge: Blob }).__huge = await canvas.convertToBlob({
+      type: 'image/png',
+    })
+  }, SOURCE)
 
   const report = await page.evaluate(async ({ source, tile }) => {
     const gl = (window as unknown as {
