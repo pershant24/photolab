@@ -1340,13 +1340,21 @@ scope is stated in the test.
 | comparison | worst | samples differing |
 |---|---|---|
 | tiled export vs whole-frame 1:1, everything enabled | **1 code value** | 0 of 667,000 |
-| two tilings of a 61MP source that exceeds `MAX_TEXTURE_SIZE` | **1 code value** | 0 of 2,457,600 |
+| two tilings of a 48MP source that exceeds `MAX_TEXTURE_SIZE` | **1 code value** | 0 of 1,322,112 |
 
 The second has no whole-frame reference available — the texture cannot be
 created — so two exports at different tile sizes are compared instead: their
 seams land in different places, so agreement is evidence neither has one. Grain
 is the strictest part of it, being a hash of the source coordinate: a tiling that
 shifted it by one pixel would disagree everywhere at once.
+
+**It first ran everything at 61MP, took 1.7 minutes locally and timed out in CI**
+— a test that runs nowhere rather than a thorough one. Its distinct contribution
+is that the source does not fit on the GPU; whether each pass is individually
+right under tiling is the first test's job, and that one is stronger for having a
+real reference. So the effect set was trimmed to grain, distortion, aberration,
+the vignette and one Gaussian kernel, the fixture's x-dependent terms are
+computed once rather than 48 million times, and it now runs in 34 seconds.
 
 ### Two of the four seam mutations needed the fixture fixed, not the code
 

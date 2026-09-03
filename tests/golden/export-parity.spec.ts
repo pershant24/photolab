@@ -326,11 +326,25 @@ test.describe('preview and export agree', () => {
  * instead, so any seam appears in one and not the other. Agreement between them
  * is evidence that neither has one.
  *
- * Separate from the suite above because it builds a 61MP fixture, which is slow
+ * Separate from the suite above because it builds a 48MP fixture, which is slow
  * enough to be worth isolating from tests that run on every change.
+ *
+ * # What this test is for, and what it deliberately leaves to the other one
+ *
+ * Its distinct contribution is that the source **does not fit on the GPU** — the
+ * upload path and the tiling at real scale. Whether every pass is individually
+ * right under tiling is the previous test's job, and that one is stronger because
+ * it has a true whole-frame reference to compare against.
+ *
+ * So the effect set here is trimmed: grain, distortion, aberration, the vignette
+ * and one Gaussian kernel. Diffusion is dropped, being a second kernel that costs
+ * three passes of ten taps per tile and adds nothing this test can see that
+ * halation does not. The first version ran everything at 61MP, took 1.7 minutes
+ * locally on the software rasteriser and **timed out in CI**, which is a test
+ * that runs nowhere rather than a thorough one.
  */
 test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
-  const HUGE = { width: 9600, height: 6400 }
+  const HUGE = { width: 8448, height: 5632 }
 
   test('two different tilings of an oversized source agree', async ({ page }) => {
     test.setTimeout(600_000)
@@ -354,19 +368,30 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
       const canvas = new OffscreenCanvas(source.width, source.height)
       const context = canvas.getContext('2d')
       if (!context) throw new Error('no 2d context')
+      // The x-dependent terms are computed once rather than 48 million times.
+      // The row loop then does three multiplies per pixel instead of two sines.
       const row = context.createImageData(source.width, 1)
+      const rampX = new Float64Array(source.width)
+      const gridX = new Float64Array(source.width)
+      const barX = new Float64Array(source.width)
+      for (let x = 0; x < source.width; x++) {
+        const u = x / source.width
+        rampX[x] = 0.2 + 0.4 * u
+        gridX[x] = 0.1 * Math.sin(u * 40)
+        barX[x] = u > 0.71 && u < 0.72 ? 0.5 : 0
+      }
       for (let y = 0; y < source.height; y++) {
+        const v = y / source.height
+        const gridY = Math.sin(v * 30)
+        const rampY = 0.15 * v
+        const barY = v > 0.78 && v < 0.79 ? 0.5 : 0
         for (let x = 0; x < source.width; x++) {
           const i = x * 4
-          const u = x / source.width
-          const v = y / source.height
-          const grid = 0.1 * Math.sin(u * 40) * Math.sin(v * 30)
-          const bar = (u > 0.71 && u < 0.72) || (v > 0.78 && v < 0.79) ? 0.5 : 0
-          const base = 0.2 + 0.4 * u + 0.15 * v + grid + bar
-          const c = Math.max(0, Math.min(255, Math.round(base * 255)))
+          const base = (rampX[x] ?? 0) + rampY + (gridX[x] ?? 0) * gridY + Math.max(barX[x] ?? 0, barY)
+          const c = base < 0 ? 0 : base > 1 ? 255 : (base * 255) | 0
           row.data[i] = c
-          row.data[i + 1] = Math.max(0, Math.min(255, Math.round(base * 0.88 * 255)))
-          row.data[i + 2] = Math.max(0, Math.min(255, Math.round(base * 0.75 * 255)))
+          row.data[i + 1] = (c * 0.88) | 0
+          row.data[i + 2] = (c * 0.75) | 0
           row.data[i + 3] = 255
         }
         context.putImageData(row, 0, y)
@@ -397,8 +422,8 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
       let worst = 0
       let differing = 0
       let total = 0
-      for (let y = 0; y < source.height; y += 5) {
-        for (let x = 0; x < source.width; x += 5) {
+      for (let y = 0; y < source.height; y += 6) {
+        for (let x = 0; x < source.width; x += 6) {
           const i = (y * source.width + x) * 4
           const delta = Math.abs((a[i] ?? 0) - (b[i] ?? 0))
           if (delta > worst) worst = delta
@@ -414,7 +439,8 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
       source: HUGE,
       edit: {
         distortion: -0.1, aberration: 0.004,
-        diffusionStrength: 0.4, diffusionRadius: 0.012,
+        // Diffusion deliberately off; see the note above.
+        diffusionStrength: 0,
         vignette: 0.5,
         halationStrength: 0.6, halationThreshold: 0.6, halationRadius: 0.006,
         grainStrength: 0.7, grainSize: 0.002,
@@ -423,7 +449,7 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
     })
 
     console.log(`HUGE ${JSON.stringify(result)}`)
-    expect(result.total).toBeGreaterThan(2_000_000)
+    expect(result.total).toBeGreaterThan(1_000_000)
     // Two tilings of the same picture are the same picture. Grain is included
     // and is the strictest part: it is a hash of the source coordinate, so a
     // tiling that shifted it by one pixel would disagree everywhere at once.
