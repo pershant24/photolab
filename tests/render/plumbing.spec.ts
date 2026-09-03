@@ -71,6 +71,14 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'ingest',
     'whiteBalance',
     'exposure',
+    // The lens stage: the glass bends the image, splits it by wavelength,
+    // scatters it, and falls off toward the corners.
+    'distortion',
+    'aberration',
+    'diffusionBlurH',
+    'diffusionBlurV',
+    'diffusionComposite',
+    'vignette',
     'halationThreshold',
     'halationBlurH',
     'halationBlurV',
@@ -91,7 +99,7 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'display',
   ])
 
-  // Three of the seventeen passes run at the default edit: imageSource is
+  // Three of the twenty-three passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
   //

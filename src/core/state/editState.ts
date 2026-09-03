@@ -1,5 +1,6 @@
 import { encodeACEScct } from '../colour/transfer'
 import { WHEEL_RANGE } from '../colour/wheels'
+import { ABERRATION_RANGE, DIFFUSION_MAX_RADIUS, DISTORTION_RANGE } from '../colour/lens'
 import {
   HSL_BANDS,
   HSL_BAND_COUNT,
@@ -113,6 +114,20 @@ export interface EditState {
 
   /** How far toward the film curves to go. 0 is off, 1 is the stock as designed. */
   readonly filmStrength: number
+
+  /**
+   * The lens stage.
+   *
+   * `distortion` is positive for pincushion and negative for barrel;
+   * `aberration` is a radial per-channel scale; `diffusion` is a neutral scatter
+   * in the glass, distinct from halation which is a red film-base effect;
+   * `vignette` is a cos^4 falloff and is 0 at the identity.
+   */
+  readonly distortion: number
+  readonly aberration: number
+  readonly diffusionStrength: number
+  readonly diffusionRadius: number
+  readonly vignette: number
 
   /** How much scattered light to add back. 0 is off. */
   readonly halationStrength: number
@@ -266,6 +281,68 @@ const SCALARS: readonly ScalarParameter[] = [
   },
   {
     kind: 'scalar',
+    key: 'distortion',
+    label: 'Distortion',
+    // Positive is pincushion, negative barrel. See src/core/colour/lens.ts for
+    // why that sign convention is not self-evident from the formula.
+    min: -DISTORTION_RANGE,
+    max: DISTORTION_RANGE,
+    step: 0.005,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'aberration',
+    label: 'Chromatic aberration',
+    // A radial scale, so the range is tiny: 0.01 displaces the corner by 1% of
+    // the half-diagonal, which on a 6000px frame is 37 pixels and already more
+    // than any lens worth using.
+    min: -ABERRATION_RANGE,
+    max: ABERRATION_RANGE,
+    step: 0.0002,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'diffusionStrength',
+    label: 'Diffusion',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'diffusionRadius',
+    label: 'Diffusion radius',
+    // A fraction of the source long edge, like every other spatial parameter.
+    // Wider than halation's, because scattering in glass spreads further than
+    // scattering within a few tens of microns of emulsion.
+    min: 0.002,
+    max: DIFFUSION_MAX_RADIUS,
+    step: 0.001,
+    defaultValue: 0.01,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'vignette',
+    label: 'Vignette',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
     key: 'halationStrength',
     label: 'Halation',
     min: 0,
@@ -410,6 +487,11 @@ export const DEFAULT_EDIT_STATE: EditState = {
   filmCurveGreen: [...IDENTITY_CHANNEL],
   filmCurveBlue: [...IDENTITY_CHANNEL],
   filmStrength: 1,
+  distortion: 0,
+  aberration: 0,
+  diffusionStrength: 0,
+  diffusionRadius: 0.01,
+  vignette: 0,
   halationStrength: 0,
   halationThreshold: 2,
   halationRadius: 0.006,

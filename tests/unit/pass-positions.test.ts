@@ -48,8 +48,22 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
   ['whiteBalance', 'exposure', 'white balance and exposure both describe the light arriving'],
 
   // Scene before lens: a vignette darkens an already-exposed frame, so exposure
-  // applied after vignetting would scale with the vignette.
-  ['exposure', 'halationThreshold', 'the scene is formed before the film records it'],
+  // applied after vignetting would scale with the vignette rather than with the
+  // aperture.
+  ['exposure', 'distortion', 'the lens acts on light that has left the scene'],
+
+  // Lens, internally, in the order the glass does it: bend, split by wavelength,
+  // scatter, fall off toward the corners.
+  ['distortion', 'aberration', 'the glass bends the image before it splits it'],
+  ['aberration', 'diffusionBlurH', 'scattering acts on the image the glass formed'],
+  ['diffusionBlurH', 'diffusionBlurV', 'the separable pair, in order'],
+  ['diffusionBlurV', 'diffusionComposite', 'the scatter is composited once it is blurred'],
+  ['diffusionComposite', 'vignette', 'falloff is illumination, and comes last in the lens'],
+
+  // Lens before film. The lens forms the image the emulsion records, which is why
+  // the vignette's darkening passes THROUGH the characteristic curves rather than
+  // being applied to a developed picture.
+  ['vignette', 'halationThreshold', 'the lens forms the image the film records'],
 
   // Film, internally. Halation adds light to the emulsion, so it happens before
   // the curves turn exposure into density; grain depends on the density those

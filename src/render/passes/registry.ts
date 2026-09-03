@@ -23,6 +23,7 @@ import { HALATION_PASSES } from './halation'
 import { hslPass } from './hsl'
 import { imageSourcePass } from './imageSource'
 import { ingestPass } from './ingest'
+import { LENS_PASSES } from './lens'
 import { splitTonePass } from './splitTone'
 import { testPatternPass } from './testPattern'
 import { wheelsPass } from './wheels'
@@ -64,6 +65,9 @@ export function registeredPasses(curvePass: Pass, filmCurvesPass: Pass): readonl
     // decides inside a stage, and this one is physical: halation adds light to
     // the emulsion, so it happens before the curves turn exposure into
     // density. Listed here rather than left to chance.
+    // The lens stage, in physical order: the glass bends the image, splits it by
+    // wavelength, scatters it, and falls off toward the corners.
+    ...LENS_PASSES,
     ...HALATION_PASSES,
     filmCurvesPass,
     // Grain last inside the film stage, and registration order is what decides
