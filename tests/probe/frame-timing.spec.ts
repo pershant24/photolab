@@ -73,7 +73,11 @@ const RESOLUTIONS: readonly [number, number][] = [
 ]
 
 test('frame time across proxy resolutions on a 12MP source', async ({ page }) => {
-  test.setTimeout(180_000)
+  // 127 seconds of 180 on CI, which is 71% and the tightest thing in the suite.
+  // It renders a 12MP source at four buffer sizes and averages over many frames,
+  // so the work is the point and cannot be trimmed without weakening the
+  // measurement it exists to make.
+  test.setTimeout(600_000)
 
   await page.goto('/')
   await page.waitForFunction(() => '__photolabRenderer' in window)

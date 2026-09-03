@@ -12,6 +12,21 @@ export default defineConfig({
   testDir: 'tests',
   testMatch: /.*\.spec\.ts/,
   fullyParallel: false,
+  /**
+   * 120 seconds, not Playwright's 30.
+   *
+   * Measured, and the measurement corrected a number this repository had wrong.
+   * The job-level variance is a factor of three, so 30 seconds looked generous
+   * for tests taking two or three locally. Per-test, CI is far slower than that:
+   * the oversized export runs 34s here and **331s there**, the frame-timing probe
+   * 12.8s here and 127s there — between six and ten times, not three.
+   *
+   * At 30 seconds that puts ordinary rendering tests past half their timeout on
+   * CI while looking comfortable locally, which is the exact shape of the failure
+   * the headroom reporter exists to catch. Raised once, globally, rather than
+   * per test as each one drifts over.
+   */
+  timeout: 120_000,
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,

@@ -1499,15 +1499,31 @@ The slowest tests print whether or not anything crossed a line. The thresholds
 catch drift that has gone too far; the listing is what lets someone notice a
 stage earlier.
 
-### It found something on its first full run
+### It found three things on its first CI run, and corrected a number
 
-The lens stage's "each effect on its own actually changes the frame" was at
-**27% of the default 30 second timeout** — 8 seconds for seven full-frame renders.
-At the three-times-slower end of the observed range that is 24 seconds of 30, and
-it would have started failing without anything about it having changed.
+Locally it flagged one test at 27% of the default 30 seconds. On CI it failed the
+run with three past half:
 
-Raised to 120 seconds deliberately, which is what the reporter's own message says
-to do. Nothing is now above 12%.
+| | CI | local | multiplier |
+|---|---|---|---|
+| frame-timing probe | **71%** — 127.1s of 180s | 12.8s | 9.9x |
+| oversized export | **55%** — 330.7s of 600s | 34s | 9.7x |
+| display transform | **53%** — 16.0s of 30s | 2.1s | 7.6x |
+
+**The important number here is the multiplier, and this repository had it wrong.**
+Job-level variance is a factor of three, which is what the thresholds were
+originally reasoned from. Per test, CI is six to ten times slower. At a 30 second
+default that puts ordinary rendering tests past half their timeout on CI while
+looking comfortable locally — the exact shape of the failure the reporter exists
+to catch, and one it caught in its own justification.
+
+The response is the one the reporter's message prescribes: the default timeout is
+raised once, globally, to 120 seconds, and the two genuinely long tests were
+raised deliberately rather than trimmed further. Nothing is now above 14%.
+
+Note what did *not* happen: the threshold was not loosened. A check that fires
+and is then relaxed to stop firing is worse than no check, because it also
+carries the appearance of one.
 
 Watched fail: with a timeout tight enough to put a passing test at 66%, the run
 exits non-zero and names the test; restored, it exits zero.

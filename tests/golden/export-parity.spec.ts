@@ -347,7 +347,11 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
   const HUGE = { width: 8448, height: 5632 }
 
   test('two different tilings of an oversized source agree', async ({ page }) => {
-    test.setTimeout(600_000)
+    // 331 seconds of 600 on CI — 55%, after already being trimmed from 1.7
+    // minutes locally to 34. The local figure was misleading: CI runs this ten
+    // times slower, not three. Raised rather than trimmed further, because what
+    // is left is the part that gives the test its purpose.
+    test.setTimeout(1_800_000)
     await page.goto('/')
     await page.waitForFunction(() => '__photolabRenderer' in window)
 
