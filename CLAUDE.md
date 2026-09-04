@@ -26,7 +26,7 @@ Three layers enforce it, because each one alone is insufficient:
 | Hook | `.githooks/commit-msg` | Any message reaching `git commit` locally |
 | Hook | `.githooks/pre-push` | Branch and tag names, which `commit-msg` never sees |
 | CI | `.github/workflows/ci.yml` | Messages and branch names on both push and pull request: `--no-verify`, the web UI, squash-merge subjects composed in the merge dialog, server-side commits, and clones where nobody set `core.hooksPath` |
-| Branch protection | *unavailable* | Would remove the direct-push path to `main`, but GitHub refuses both rulesets and classic protection on a private repository on this plan (HTTP 403, "Upgrade to GitHub Pro or make this repository public"). Making the repository public would enable it, and is required for GitHub Pages anyway |
+| Ruleset | *"main requires a pull request"* | Removes the direct-push path to `main` entirely. Was unavailable while the repository was private on this plan — GitHub refused both rulesets and classic protection with HTTP 403 — and became available when it went public. Verified by attempting a direct push, which is refused with "Changes must be made through a pull request" |
 
 Because `main` cannot be protected, **the CI check on the `push` event is the
 only backstop for a commit that reaches `main` without a pull request.** That is
@@ -49,14 +49,22 @@ the other two fields do not suppress.
 
 ### Known accepted residuals
 
-Reading the forbidden-pattern file from the default branch protects against
-tampering on a pull request, because the base ref predates the change. On a
-direct push to `main` there is no base ref and `origin/main` already includes
-the pushed commits, so a push that neuters the pattern file and adds a forbidden
-commit together would be checked against its own tampered pattern. The
-consistent fix is reading from `github.event.before` on pushes. Accepted, not
-built: `main` being unprotected is the root cause and resolves when the repo
-goes public, and the attack requires deliberate self-sabotage on a solo repo.
+**The direct-push residual is closed.** It read: the forbidden-pattern file is
+read from the default branch, which protects against tampering on a pull request
+because the base ref predates the change — but on a direct push there is no base
+ref and `origin/main` already includes the pushed commits, so a push that
+neutered the pattern file and added a forbidden commit together would have been
+checked against its own tampered pattern.
+
+The root cause was that `main` could be pushed to at all. It cannot now: the
+ruleset above requires a pull request, so every change reaches `main` through a
+base ref that predates it, which is the case the check was already correct for.
+Verified rather than assumed — a direct push was attempted and refused.
+
+The `github.event.before` fix on pushes is therefore not needed and is not built.
+The `push` trigger stays on the CI job regardless, because it is what catches a
+squash-merge subject composed in the merge dialog, which no pull-request event
+sees.
 
 Note that the hook pattern matches the bare word `claude`, case-insensitively.
 A commit message naming the file `CLAUDE.md` will therefore be rejected. This is
