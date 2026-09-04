@@ -169,7 +169,7 @@ test.describe('preview and export agree', () => {
     >(async ({ edit, source, overlapOverride }) => {
       const w = window as unknown as {
         __photolabRenderer: RendererLike
-        __photolabExport: (...args: unknown[]) => Promise<{ blob: Blob; overlap: number; tiles: number }>
+        __photolabExportDirect: (...args: unknown[]) => Promise<{ blob: Blob; overlap: number; tiles: number }>
         __sourceBlob: Blob
       }
       const renderer = w.__photolabRenderer
@@ -179,7 +179,7 @@ test.describe('preview and export agree', () => {
       const merged = { ...renderer.input.edit, ...edit }
 
       // ---- the export leg
-      const result = await w.__photolabExport(
+      const result = await w.__photolabExportDirect(
         renderer.context, renderer.graph, w.__sourceBlob, merged, view,
         source.width, source.height,
         { format: 'image/png', ...(overlapOverride === null ? {} : { overlap: overlapOverride }) },
@@ -358,7 +358,7 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
     const result = await page.evaluate(async ({ source, edit }) => {
       const w = window as unknown as {
         __photolabRenderer: RendererLike
-        __photolabExport: (...args: unknown[]) => Promise<{
+        __photolabExportDirect: (...args: unknown[]) => Promise<{
           blob: Blob; overlap: number; tiles: number; uploadPath: string
         }>
       }
@@ -405,7 +405,7 @@ test.describe('a source larger than MAX_TEXTURE_SIZE', () => {
       const merged = { ...renderer.input.edit, ...edit }
       const view = { ...renderer.input.view, inspect: false }
       const run = async (tileSize: number): Promise<Uint8ClampedArray> => {
-        const out = await w.__photolabExport(
+        const out = await w.__photolabExportDirect(
           renderer.context, renderer.graph, blob, merged, view,
           source.width, source.height,
           { format: 'image/png', tileSize },

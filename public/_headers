@@ -1,0 +1,17 @@
+# Cross-origin isolation.
+#
+# `performance.measureUserAgentSpecificMemory()` is the only API that can see an
+# ImageBitmap, a GPU-backed canvas or a detached buffer — `performance.memory`
+# reports the JS heap and would say 15MB while a quarter of a gigabyte of pixels
+# is resident. It refuses to run without these two headers.
+#
+# This is what settled the hosting question left open since the branch-protection
+# 403: GitHub Pages cannot set response headers, so it cannot be measured there.
+# Cloudflare Pages and Netlify both read this file and both deploy from a private
+# repository.
+#
+# Safe here because the application loads nothing cross-origin: no CDN, no fonts,
+# no analytics. Images are opened from the user's disk and never fetched.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

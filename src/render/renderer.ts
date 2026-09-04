@@ -168,6 +168,7 @@ export class Renderer {
   #context: RenderContext
   #graph: RenderGraph
   #edit: EditState = DEFAULT_EDIT_STATE
+  #canvas: HTMLCanvasElement
   #view: ViewState = DEFAULT_VIEW_STATE
   #source: RenderSource = { kind: 'pattern' }
   #curvePass: CurvePass
@@ -184,6 +185,12 @@ export class Renderer {
   #disposed = false
 
   constructor(canvas: HTMLCanvasElement) {
+    // Kept as its own field rather than read back off the context, which now
+    // allows an OffscreenCanvas so the export worker can share the graph. Only
+    // the interactive renderer needs a DOM canvas — for `clientWidth` and for
+    // the CSS size the drag proxy must not disturb — and it is the one place
+    // that knows it has one.
+    this.#canvas = canvas
     this.#context = createRenderContext(canvas)
     this.#curvePass = createCurvePass()
     this.#filmCurvesPass = createFilmCurvesPass()
@@ -288,7 +295,7 @@ export class Renderer {
    * make. See docs/SHADER_CONVENTIONS.md §1.
    */
   syncSize(available?: { readonly width: number; readonly height: number }): boolean {
-    const canvas = this.#context.canvas
+    const canvas = this.#canvas
     const ratio = Math.min(window.devicePixelRatio || 1, 2)
     const box = available ?? { width: canvas.clientWidth, height: canvas.clientHeight }
     const availablePixels: [number, number] = [

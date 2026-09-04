@@ -1527,3 +1527,99 @@ carries the appearance of one.
 
 Watched fail: with a timeout tight enough to put a passing test at 66%, the run
 exits non-zero and names the test; restored, it exits zero.
+
+## Export off the main thread
+
+A 60MP export renders tens of tiles through the full pass chain and encodes a
+quarter of a gigabyte of pixels. On the main thread that is seconds of frozen
+interface.
+
+### What it took to share the pass chain
+
+**One type widened.** `RenderContext.canvas` accepts an `OffscreenCanvas` as well
+as an `HTMLCanvasElement`, and `createRenderContext` takes either.
+
+That is the whole of it, because `RenderGraph` was built around `gl` rather than
+around a canvas at Stage 3, so nothing between the graph and the passes has ever
+known there is a DOM. Only `Renderer` reads the canvas — for `clientWidth` and
+for the CSS size the drag proxy must not disturb — and it now keeps its own
+`HTMLCanvasElement` reference rather than reading it back off the context. The
+export path does not use `Renderer` at all.
+
+The worker imports the graph, the passes, the shaders and `exportImage` from
+where the interactive path gets them. **Asserted, not asserted-about**: the
+worker's PNG is compared byte for byte against the main thread's, on a tiled
+export, and they are identical. Two render paths that agree the day they are
+written drift afterwards, and this is the only thing standing between "shares the
+chain" and "has a copy of it".
+
+One build change was needed: Vite gives workers their own plugin pipeline, and
+the export worker is the first to import a shader. Without the GLSL plugin in
+`worker.plugins` the build fails on the first line of GLSL it meets.
+
+### The compile cost does not matter
+
+A worker cannot share a GL context, so it has its own program cache and the first
+export compiles every enabled pass. Measured over three consecutive exports of
+the same 2400×1600 source: **1978 ms, 2150 ms, 2088 ms**. The first is the
+*fastest* of the three — the compile is below the run-to-run noise of the export
+itself, and it is paid once per worker rather than once per export.
+
+### Cancellation needed a yield, and would not have worked without it
+
+`shouldCancel` is checked between tiles, and the check could never have seen a
+cancellation. On the pixel-store path the whole tile loop is synchronous, so a
+worker running it never returns to its message queue: a `cancel` posted from the
+main thread sits undelivered until the export has already finished. A microtask
+would not help either — `postMessage` delivery is a task.
+
+Watched: without a `setTimeout(0)` between tiles the cancellation test fails with
+the export running to completion.
+
+### Peak memory: measured by proxy, and why
+
+Cross-origin isolation **is configured** — `public/_headers` for the deployed
+copy, `server`/`preview` headers in `vite.config.ts` for local — and verified:
+`crossOriginIsolated` is `true` in both the window and the worker.
+
+`measureUserAgentSpecificMemory` still cannot be used, for two reasons, both
+measured rather than assumed and both asserted so that the day either changes,
+the test says so:
+
+1. **It is not exposed in a worker at all.** Inside the export worker
+   `crossOriginIsolated` is true and the property is absent; the only
+   measure-shaped members of `performance` there are `measure` and
+   `clearMeasures`.
+2. **In the window it rejects** with `SecurityError: performance.measureUserAgentSpecificMemory
+   is not available` — isolated, and also with
+   `--enable-blink-features=PerformanceMeasureMemory` and `--site-per-process`.
+
+So the peak is **not** reported as a number of bytes. This project has already
+reported arithmetic as measurement once, and the honest alternative is a proxy
+that answers the question the number was wanted for: how large a source can
+actually be exported.
+
+Measured on the **software rasteriser**, which is the worst case available:
+
+| source | tiles | time | result |
+|---|---|---|---|
+| 12MP, 4243×2829 | 6 | 6.8 s | OK |
+| 24MP, 6000×4000 | 6 | 9.8 s | OK |
+| 40MP, 7746×5164 | 12 | 20.2 s | OK |
+| **61MP, 9566×6377** | 20 | 38.9 s | **OK** |
+
+61MP exports successfully on a software rasteriser, at roughly 0.64 s per
+megapixel and linear in pixel count. **So the reduced-resolution export option
+B3 offers as a mitigation is not needed**, and it is not built — the measurement
+was taken to decide that rather than to justify it.
+
+### Failing cleanly
+
+An export whose output canvas cannot be allocated rejects with a message, leaves
+the page responsive, and **leaves the worker usable** — a subsequent export of a
+normal source succeeds. Tested by asking for a 200,000 × 200,000 output, which no
+browser will allocate.
+
+A worker whose context cannot support the pipeline fails loudly with
+`ExportUnsupported`, per the standing rule, rather than quietly producing an
+8-bit approximation of the picture.

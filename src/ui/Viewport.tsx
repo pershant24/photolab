@@ -13,6 +13,7 @@ import { editorStore } from '../core/state/editorStore'
 import { imageKey, loadEdit, saveEdit } from '../core/state/sessionStore'
 import type { EditorStoreState } from '../core/state/editorStore'
 import { exportImage } from '../render/export'
+import { ExportCancelled, ExportClient, ExportUnsupported } from '../render/exportClient'
 import { RendererUnsupportedError } from '../render/gl/context'
 import { ImageLoader, isSupersededError } from '../render/imageLoader'
 import { Renderer } from '../render/renderer'
@@ -22,6 +23,7 @@ type Status = { kind: 'starting' } | { kind: 'running' } | { kind: 'failed'; mes
 interface Session {
   renderer: Renderer
   loader: ImageLoader
+  exporter: ExportClient
 }
 
 export function Viewport() {
@@ -65,7 +67,8 @@ export function Viewport() {
     }
 
     const loader = new ImageLoader()
-    sessionRef.current = { renderer, loader }
+    const exporter = new ExportClient()
+    sessionRef.current = { renderer, loader, exporter }
 
     // The store is the only writer of edit parameters, and the renderer is a
     // reader of it. Nothing else pushes state in, so there is one path from a
@@ -123,12 +126,14 @@ export function Viewport() {
       __photolabRenderer?: Renderer
       __photolabStore?: typeof editorStore
       __photolabFilmStocks?: typeof FILM_STOCKS
-      __photolabExport?: typeof exportImage
+      __photolabExport?: ExportClient
+      __photolabExportDirect?: typeof exportImage
     }
     hooks.__photolabRenderer = renderer
     hooks.__photolabStore = editorStore
     hooks.__photolabFilmStocks = FILM_STOCKS
-    hooks.__photolabExport = exportImage
+    hooks.__photolabExport = exporter
+    hooks.__photolabExportDirect = exportImage
 
     return () => {
       observer.disconnect()
@@ -138,11 +143,13 @@ export function Viewport() {
       unsubscribe()
       loader.dispose()
       renderer.dispose()
+      exporter.dispose()
       sessionRef.current = null
       delete hooks.__photolabRenderer
       delete hooks.__photolabStore
       delete hooks.__photolabFilmStocks
       delete hooks.__photolabExport
+      delete hooks.__photolabExportDirect
     }
   }, [])
 
@@ -217,7 +224,8 @@ export function Viewport() {
     if (!renderer || !from) return
     const source = renderer.source
     if (source.kind !== 'image') return
-    const canvas = renderer.context.canvas
+    const canvas = canvasRef.current
+    if (!canvas) return
     const ratio = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : 1
     renderer.setView({
       inspectCentre: [
@@ -239,26 +247,26 @@ export function Viewport() {
    * binding framebuffers on one context.
    */
   const runExport = useCallback(async (format: 'image/jpeg' | 'image/png') => {
-    const renderer = sessionRef.current?.renderer
+    const session = sessionRef.current
+    const renderer = session?.renderer
     const source = sourceFile.current
-    if (!renderer || !source) return
+    if (!session || !renderer || !source) return
     setExportNote(null)
     setExporting({ done: 0, total: 1 })
-    renderer.stop()
     try {
-      const result = await exportImage(
-        renderer.context,
-        renderer.graph,
-        source.blob,
-        editorStore.getState().edit,
-        renderer.view,
-        source.width,
-        source.height,
-        {
-          format,
-          onProgress: (done, total) => setExporting({ done, total }),
-        },
-      )
+      // The worker has its own GL context, so the interactive one keeps
+      // rendering: the viewport stays live and a slider still moves while a
+      // 60MP export runs.
+      const result = await session.exporter.run({
+        blob: source.blob,
+        edit: editorStore.getState().edit,
+        view: renderer.view,
+        sourceWidth: source.width,
+        sourceHeight: source.height,
+        format,
+        ...(format === 'image/jpeg' ? { quality: 0.92 } : {}),
+        onProgress: (done, total) => setExporting({ done, total }),
+      })
       const url = URL.createObjectURL(result.blob)
       const anchor = document.createElement('a')
       anchor.href = url
@@ -268,14 +276,20 @@ export function Viewport() {
       URL.revokeObjectURL(url)
       setExportNote(
         `${result.width}x${result.height}, ${result.tiles} tiles, ${result.overlap}px overlap, ` +
-          `${(result.blob.size / 1e6).toFixed(1)} MB in ${(result.milliseconds / 1000).toFixed(1)}s ` +
-          `(${result.uploadPath})`,
+          `${(result.blob.size / 1e6).toFixed(1)} MB in ${(result.milliseconds / 1000).toFixed(1)}s`,
       )
     } catch (error) {
-      setExportNote(error instanceof Error ? error.message : 'Export failed.')
+      if (error instanceof ExportCancelled) {
+        setExportNote('Export cancelled.')
+      } else if (error instanceof ExportUnsupported) {
+        // Loud, per the standing rule: a worker that cannot support the pipeline
+        // says so rather than quietly producing a lesser picture.
+        setExportNote(`Export is unavailable on this device. ${error.message}`)
+      } else {
+        setExportNote(error instanceof Error ? error.message : 'Export failed.')
+      }
     } finally {
       setExporting(null)
-      renderer.start()
     }
   }, [])
 

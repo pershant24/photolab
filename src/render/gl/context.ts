@@ -47,9 +47,23 @@ export interface RenderCapabilities {
 
 export type ContextStatus = 'ok' | 'lost'
 
+/**
+ * A canvas the renderer can draw into.
+ *
+ * Either kind. `OffscreenCanvas` is what the export worker uses: it has no
+ * document to be attached to, and export never displays anything.
+ *
+ * This is the whole of what it took to make the pipeline context-agnostic, and
+ * it is small for a reason worth stating — `RenderGraph` was built around `gl`
+ * rather than around the canvas from Stage 3, so nothing between the graph and
+ * the passes ever learned there was a DOM. Only `Renderer` reads the canvas, for
+ * sizing and the drag proxy, and the export path does not use `Renderer` at all.
+ */
+export type RenderSurface = HTMLCanvasElement | OffscreenCanvas
+
 export interface RenderContext {
   readonly gl: WebGL2RenderingContext
-  readonly canvas: HTMLCanvasElement
+  readonly canvas: RenderSurface
   readonly capabilities: RenderCapabilities
   /** Never render while this is `'lost'`; every GL object is invalid. */
   status(): ContextStatus
@@ -90,8 +104,11 @@ const NO_WEBGL2_MESSAGE =
  * A pipeline whose premise has silently been removed is worse than one that
  * says it cannot run.
  */
-export function createRenderContext(canvas: HTMLCanvasElement): RenderContext {
-  const gl = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES)
+export function createRenderContext(canvas: RenderSurface): RenderContext {
+  // Cast because `OffscreenCanvas.getContext` is typed as returning a union of
+  // every context kind rather than being narrowed by the literal, unlike
+  // `HTMLCanvasElement.getContext`. The null check below is the real guard.
+  const gl = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES) as WebGL2RenderingContext | null
   if (!gl) {
     throw new RendererUnsupportedError(NO_WEBGL2_MESSAGE, 'getContext("webgl2") returned null')
   }

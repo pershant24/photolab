@@ -52,6 +52,23 @@ export interface ExportOptions {
    * reference to compare against when the frame does not fit on the GPU.
    */
   readonly tileSize?: number
+  /**
+   * Checked between tiles. Returning true abandons the export.
+   *
+   * Between tiles rather than inside one: a tile is a single synchronous run of
+   * the pass chain and there is nowhere within it to yield. A 60MP export is
+   * tens of tiles, so the worst wait after pressing cancel is one tile.
+   */
+  readonly shouldCancel?: () => boolean
+  /**
+   * Called once, after the last tile and before encoding.
+   *
+   * This is the peak: the full source bitmap, the output canvas, the resolve
+   * target and the graph's intermediates are all still alive, and the encoded
+   * blob does not exist yet. Measuring after `exportImage` returns would report
+   * the floor, because everything but the blob has been released by then.
+   */
+  readonly onBeforeEncode?: () => Promise<void>
 }
 
 export interface ExportResult {
@@ -65,7 +82,14 @@ export interface ExportResult {
   readonly uploadPath: 'pixel-store' | 'crop-rectangle'
 }
 
-export class ExportError extends Error {}
+export class ExportError extends Error {
+  /** True when the export stopped because it was asked to, not because it broke. */
+  readonly cancelled: boolean
+  constructor(message: string, cancelled = false) {
+    super(message)
+    this.cancelled = cancelled
+  }
+}
 
 /**
  * The largest tile worth using, given the device and the memory it implies.
@@ -267,6 +291,20 @@ export async function exportImage(
   try {
     options.onProgress?.(0, plan.length)
     for (const [index, { output, read }] of plan.entries()) {
+      // Yield to the event loop between tiles, as a macrotask rather than a
+      // microtask.
+      //
+      // This is not politeness, it is what makes cancellation reachable at all.
+      // On the pixel-store path the whole tile loop is synchronous, so a worker
+      // running it never returns to its message queue: a `cancel` posted from the
+      // main thread sits undelivered until the export has already finished, and
+      // `shouldCancel` is asked a question whose answer cannot have arrived. A
+      // microtask would not help — `postMessage` delivery is a task.
+      //
+      // Watched: without this the cancellation test fails with the export running
+      // to completion, on both paths.
+      if (index > 0) await new Promise((resolve) => setTimeout(resolve, 0))
+      if (options.shouldCancel?.()) throw new ExportError('Export cancelled.', true)
       const texture =
         full !== null
           ? uploadSubRect(gl, full, read)
@@ -329,15 +367,20 @@ export async function exportImage(
       options.onProgress?.(index + 1, plan.length)
     }
   } finally {
-    full?.close()
     gl.deleteFramebuffer(resolve.framebuffer)
     gl.deleteTexture(resolve.texture)
   }
+
+  await options.onBeforeEncode?.()
 
   const encoded = await canvas.convertToBlob({
     type: options.format,
     ...(options.format === 'image/jpeg' ? { quality: options.quality ?? 0.92 } : {}),
   })
+  // Released only now. Closing it in the `finally` above would have freed the
+  // largest single allocation before the peak was measured, and reported a
+  // number a quarter of a gigabyte too low.
+  full?.close()
 
   return {
     blob: encoded,
