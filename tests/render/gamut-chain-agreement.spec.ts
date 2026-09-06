@@ -32,10 +32,29 @@ const FRAME = 'docs/images/original.jpg'
 
 /**
  * Half-float intermediates on the GPU against float64 in Node cannot agree
- * exactly. One code value is the bound the export parity test carries; two is
- * the point past which a hue conclusion could move.
+ * exactly, and since the gamut compressor was given a gate they cannot agree on
+ * *which colours it acts on* either. That is not a defect to be tuned away, it
+ * is what a sign test costs, and the bound here is set from the measurement
+ * rather than from a wish.
+ *
+ * The gate opens when a channel is negative. Half float carries about three
+ * decimal digits, so the two implementations disagree about the sign of any
+ * channel whose true value is within roughly 1e-3 of zero — one side compresses
+ * and the other does not. Near black the sRGB transfer function has a slope of
+ * `12.92 * 255`, about 3300 code values per unit, so a linear disagreement of
+ * 1e-3 is around three code values.
+ *
+ * Measured on this frame: worst 3, on 4 pixels of 607,500. Set at 5 for
+ * headroom at brighter achromatic values, where the half-float quantum is
+ * larger.
+ *
+ * This was 108 before the operator changed, on 241 pixels. The shoulder stepped
+ * by 0.05 of the achromatic value the instant a channel crossed zero, however
+ * small the crossing; `1 / distance` bounds the change by the excursion, so a
+ * disagreement about a near-zero sign now costs a near-zero difference. The
+ * measurement that forced it is in `tests/README.md`.
  */
-const TOLERANCE = 2
+const TOLERANCE = 5
 
 test.describe('the census chain', () => {
   for (const grade of AGREEMENT_GRADES) {

@@ -133,26 +133,54 @@ above display white exist throughout the pipeline and must be brought down by a
 curve that preserves their ordering.
 
 Gamut compression handles the colours that AP1 can represent and the display
-cannot. **It reduces saturation along a line toward the achromatic value, which
-preserves the chroma vector's direction in linear sRGB exactly — and that is not
-the same as preserving perceptual hue.** This paragraph previously said that
-clipping shifts hue, implying compression does not. Measured over the whole
-reachable space:
+cannot — **and only those.** It is gated on an actual out-of-gamut condition, a
+negative channel after the display matrix, so a colour inside the display
+primaries is returned bit for bit.
 
-| | worst CIELAB hue shift |
-|---|---|
-| gamut compression | 63.0° |
-| per-channel clipping | 91.4° |
+That gate is recent and it replaced a trigger based on distance from the
+achromatic axis, which is a measure of *saturation* rather than of excursion. The
+difference was not academic: on a real photograph the largest population the
+compressor harmed was one that had never left the gamut, and a neutral edit with
+no grade moved 0.23% of a frame. `tests/README.md` carries the census and the
+before-and-after.
 
-Compression has the better worst case and is at least as good on 79.8% of the
+Once gated, the operator is forced. It desaturates by exactly enough to reach the
+boundary and no further:
+
+    scale = 1 / distance
+
+A softer approach is not available. With a shoulder whose knee sits at `k`, the
+operator steps by `(1 - k) / 2` the instant a channel crosses zero however small
+the crossing, and that step vanishes only at `k = 1`, where the shoulder
+degenerates to this. The property that buys is `|change| <= |excursion|`, which
+is what keeps two implementations at different precisions from disagreeing
+wildly about a channel sitting near zero.
+
+**It reduces saturation along a line toward the achromatic value, which preserves
+the chroma vector's direction in linear sRGB exactly — and that is not the same
+as preserving perceptual hue.** This paragraph previously said that clipping
+shifts hue, implying compression does not. Measured over a sweep of everything
+the pipeline can reach, at 0.05 spacing from -0.6 to 2.0 per channel with a
+CIELAB chroma floor of 5 (137,854 colours):
+
+| | worst CIELAB hue shift | at least as good as clipping |
+|---|---|---|
+| gamut compression, gated | 63.3° | 85.6% |
+| gamut compression, old distance trigger | 63.1° | 80.8% |
+| per-channel clipping | 103.5° | — |
+
+Compression has much the better worst case and is at least as good on most of the
 space. It is **not** uniformly better, and the cases where it loses are strongly
 hue-dependent rather than related to how far outside the gamut a colour sits.
+The gate did not change the worst case — it improved how often compression wins,
+by no longer competing on colours where clipping was already the identity.
 `src/core/colour/display.ts` carries the full reasoning and
 `tests/unit/display.test.ts` holds the bound.
 
-What compression buys that is unconditional: a smooth approach to the boundary
-rather than a hard edge, no darkening (the achromatic value is the largest
-channel and is left unmoved), and exact preservation of the chroma direction.
+What compression buys that is unconditional: no darkening (the achromatic value
+is the largest channel and is left unmoved), exact preservation of the chroma
+direction, and — since the gate — exact preservation of every colour that was
+never out of gamut.
 
 A `none` mode is available and used by the round-trip test, where sRGB in must
 equal sRGB out through an otherwise identity pipeline. That test would be
