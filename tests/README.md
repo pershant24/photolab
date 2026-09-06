@@ -1623,3 +1623,217 @@ browser will allocate.
 A worker whose context cannot support the pipeline fails loudly with
 `ExportUnsupported`, per the standing rule, rather than quietly producing an
 8-bit approximation of the picture.
+
+## The gamut question, settled empirically
+
+Stage 6 recorded that gamut compression is *not* uniformly better than clipping
+and left the fix as "a decision about the compressor". That decision needed a
+number nobody had: on real photographs at grades anyone would actually apply,
+how much of a frame lands where compression loses, and by how much. This is that
+measurement. **No fix is implemented here** — the brief asked for the number
+first, and the number changed what the fix should be.
+
+### How it was measured
+
+Every pointwise pass composed in Node from `src/core/colour/`, run over real
+photograph pixels, stopping at the input to the display transform — which is the
+quantity the whole question is about. Full float precision throughout, which is
+the reason it is not done in the browser: an out-of-gamut colour has negative
+channels, and an `RGBA8` readback cannot carry one.
+
+The three spatial passes — diffusion, halation, grain — are excluded, because
+they have no pure-TypeScript form to compose. That exclusion biases the answer
+**downward**: halation injects saturated warm light into exactly the highlights
+that are already near the boundary. Everything reported here is therefore a
+floor.
+
+`tests/render/gamut-chain-agreement.spec.ts` is what makes that composition
+trustworthy. The individual colour functions are already asserted against their
+shaders; what is not otherwise checked anywhere is the *order* and which encode
+each pass sits inside, and getting that wrong would produce a census of a
+pipeline this project does not have. It renders the same frame both ways with
+the spatial passes off on both sides:
+
+| grade | passes exercised | worst | samples differing |
+|---|---|---|---|
+| teal-orange | film curves, contrast, lift/gain, HSL | **1 code value** | 5.7% |
+| faded-document | film curves, contrast, lift, split tone, HSL | **1 code value** | 4.4% |
+| wb, exposure, wheels, split | white balance, exposure, tone curve, all three wheels, split tone | **1 code value** | 7.7% |
+
+Every pointwise pass appears in at least one row. Half-float on the GPU against
+float64 in Node cannot agree exactly; one code value is the same bound the export
+parity test carries.
+
+It reads the photograph committed under `docs/images/` and decodes it in the
+page, so it runs anywhere the suite runs. That is a correction: the first
+version read its frame from a scratch directory named after a session, which
+would have made it skip on every machine forever while this document cited it
+in the present tense. **That would have been the third check in this repository
+to pass by not running** — after `tsc --noEmit` at Stage 2 and the oversized
+export test at Stage 10. Three is a pattern rather than three accidents: the
+common cause each time was a check whose *inputs* were not part of the thing
+being checked.
+
+It also caught something on its first honest run, which is the argument for
+having written it. The tone curve grade disagreed by **15 code values on 93% of
+the frame**. The chain was right; the harness was wrong. Node built its state
+through `mergeEditState`, which sanitises every value, while the browser got the
+raw patch — so a curve endpoint written as a rounded literal was adjusted on one
+side only and the two sides graded differently. Both now receive the sanitised
+state. A test comparing two things that were never the same measures nothing,
+and the failure was large enough to be obviously structural rather than
+tolerance drift, which is the only reason it was not mistaken for one.
+
+### The partition, which the first run forced
+
+The first run measured one number — "pixels where compression is worse than
+clipping" — and it was close to meaningless, because it averaged two populations
+that want opposite conclusions.
+
+**The clamp only bites where a channel is negative.** The tone map already brings
+everything above 1 back inside, so on a colour with no negative channel the
+clipped path *is* the untouched path. Clipping does nothing there.
+
+**The compressor's `distance` is not out-of-gamutness, it is saturation.** A pure
+display primary sits at `distance = 1`, comfortably past the 0.9 threshold and
+entirely inside the gamut. `display.ts` says so in its own comment. So the
+compressor acts on a large population that clipping would never have touched.
+
+Those are different questions and are reported separately from here on.
+
+### The correction that changed every out-of-gamut number
+
+The neutral edit — sRGB in, sRGB out, the identity in exact arithmetic —
+reported **0.34% to 2.01% of pixels as out of gamut**. That is impossible, and it
+was the `ACESCG_TO_SRGB · SRGB_TO_ACESCG` round trip landing a channel at
+-2.2e-16 instead of 0.
+
+Measured rather than assumed: over a sweep of the 8-bit cube the worst negative
+the round trip produces anywhere is **2.22e-16**, one ulp, and the count falls to
+zero at any epsilon from 1e-12 upward. The census now requires a channel below
+**-1e-9** — seven orders above that noise, six below the 1/255 that could change
+an output code value.
+
+This is the third time in this repository a measurement has been wrong because
+something at the floating-point floor was read as a physical effect. It is worth
+saying plainly: **a fraction-of-pixels metric with no epsilon measures the
+arithmetic, not the picture.**
+
+### The census
+
+One photograph, 0.61MP, at the default threshold of 0.9.
+
+The frame deserves a sentence, because what it is makes every number here more
+conservative than it looks. It is not a camera original: it is
+`docs/images/original.jpg`, an export of one through this pipeline at a neutral
+edit — so the tone map, the clamp and *the compressor under study* have already
+run once — then downscaled to 900px and JPEG encoded at 4:2:0, which carries
+chroma at half resolution in both axes. Each of those pulls the saturation
+distribution inward, and the subsampling and the downscale specifically average
+away the small strongly-saturated features this is counting. Together with the
+excluded spatial passes, everything below is a floor with three independent
+reasons to be one. Percentages are of all
+pixels in the frame. "Visible" is a hue shift of at least 1°.
+
+| grade | out of gamut | compression worse | …visibly | worst | in-gamut compressed | …visibly | in-gamut p99 |
+|---|---|---|---|---|---|---|---|
+| neutral | **0%** | 0% | 0% | — | 1.65% | 0.23% | 3.4° |
+| preset faded-document | 0% | 0% | 0% | — | 0.03% | 0% | 0.2° |
+| preset soft-portrait | 0.05% | 0.02% | 0% | 0.8° | 2.37% | 0.08% | 2.6° |
+| preset teal-orange | 5.18% | 1.85% | 0.71% | 61.4° | 14.28% | 2.55% | **38.8°** |
+| preset night-push | 6.83% | 1.47% | 0.35% | 63.8° | 12.33% | 1.48% | 23.9° |
+| soft-portrait +0.3 sat | 4.43% | 1.18% | 0.17% | 8.8° | 9.44% | 0.92% | 8.7° |
+| teal-orange +0.3 sat | 27.82% | 6.48% | 2.79% | 61.4° | 17.36% | 3.14% | 39.7° |
+| sat +0.3 only | 2.36% | 0.96% | 0.41% | 9.6° | 5.11% | 0.53% | 5.2° |
+| sat +0.5 only | 5.98% | 1.87% | 0.69% | 13.7° | 10.29% | 0.68% | 4.5° |
+| sat +1.0 only (max) | 27.65% | 5.84% | 1.38% | 19.4° | 15.78% | 0.85% | 4.3° |
+| punchy +1.0 sat (max) | 41.63% | 8.05% | 3.00% | 27.6° | 12.87% | 1.53% | 22.4° |
+| exposure +1.5 contrast 1.4 | 1.87% | 0.77% | 0.42% | **67.1°** | 6.46% | 1.97% | **57.9°** |
+
+### What it says
+
+**The Stage 6 finding is real on photographs, and it is not the biggest problem.**
+Two shipping presets put 5–7% of a frame out of gamut, and compression ends
+further from the true hue than clipping on a fifth to a third of those — but
+visibly so on only 0.35–0.71% of the frame. The median loss where compression
+does lose is **under half a degree**. The tail is what hurts: 61° and 64° worst,
+and a p99 in the teens.
+
+**The larger cost is on colours that were never out of gamut.** In every row the
+in-gamut population is two to three times the out-of-gamut one, and there
+clipping is the identity — so every degree is a pure loss with nothing on the
+other side. teal-orange shifts **2.55% of the frame visibly, p99 38.8°**, against
+0.71% visibly harmed out of gamut. A neutral edit with no grade at all still
+moves 0.23% of the frame by a degree or more.
+
+**Tone shaping alone reaches the region**, without touching saturation:
+`exposure +1.5, contrast 1.4` produces the worst single shift measured, 67°, and
+the worst in-gamut p99 at 57.9°. So this is not only an HSL problem, which is
+what Stage 6's construction implied.
+
+**The desaturating preset is untouched** — faded-document is 0% and 0.03%. The
+harm scales with saturation, exactly as the mechanism predicts.
+
+### Threshold sensitivity
+
+`gamutThreshold` moves both harms the same way, monotonically. Fraction of the
+frame shifted visibly:
+
+| threshold | teal-orange oog worse | teal-orange in-gamut | night-push in-gamut | neutral in-gamut |
+|---|---|---|---|---|
+| 0.70 | 1.54% | 12.44% | 10.00% | 1.62% |
+| 0.80 | 0.85% | 6.20% | 3.82% | 0.84% |
+| 0.85 | 0.73% | 4.27% | 2.18% | 0.53% |
+| **0.90** (default) | 0.71% | 2.55% | 1.48% | 0.23% |
+| 0.95 | 0.62% | 1.00% | 0.72% | 0.02% |
+| 0.99 | 0.45% | 0.19% | 0.10% | 0% |
+
+Raising it helps both populations, and helps the in-gamut one far more — an
+order of magnitude between 0.9 and 0.99, against a third on the out-of-gamut
+side. The out-of-gamut population size never moves, because that is a fact about
+the grade rather than about the operator.
+
+There is a cost, and it is in the tail rather than the count: for night-push the
+p99 loss where compression loses rises from 20.5° at 0.9 to **36.5° at 0.99**.
+With less runway between the threshold and the colour's actual distance, the
+compression that does happen is more abrupt. Raising the threshold trades a much
+smaller number of harmed pixels for somewhat worse harm on the ones left.
+
+### The recommendation, not implemented here
+
+The threshold is the wrong control, and moving it is a palliative. The defect the
+numbers point at is that **`distance` measures saturation and is used as though
+it measured gamut excursion**. That is why the largest population of harmed
+pixels is one that was never out of gamut: the operator cannot tell "saturated"
+from "outside", so it treats the first as the second.
+
+Two candidates, in the order I would try them:
+
+1. **Gate compression on an actual excursion.** Leave a colour alone when no
+   channel is negative, regardless of how saturated it is. On this evidence that
+   removes the entire in-gamut column — the larger harm — and cannot make the
+   out-of-gamut column worse, because it changes nothing there. It also restores
+   the property `display.ts` currently has to disclaim, that an in-gamut colour
+   is unchanged.
+2. **Then** revisit the out-of-gamut operator on what remains, where the honest
+   summary is still Stage 6's: better on average, worse in a tail that reaches
+   60°, and not correlated with how far outside the colour is.
+
+Doing (1) first is what the partition argues for, and it is the smaller change.
+
+### What this does not measure
+
+Hue only, on one photograph, with the three spatial passes excluded.
+
+Clipping also destroys chroma and shifts lightness, and none of that is in these
+numbers — so "compression loses" throughout means "loses on hue", which is
+narrower than it sounds and is the axis most favourable to clipping. A wider
+census wants more frames; the four-frame set this was first run on was lost to a
+scratch-directory wipe, and the surviving frame is the one committed under
+`docs/images/`.
+
+Those four-frame runs predate the epsilon correction above, so their
+out-of-gamut counts were inflated and their exact numbers are not quoted here.
+What did carry across all four, and is worth having: the ordering of grades was
+the same, the in-gamut population outweighed the out-of-gamut one on every frame
+and grade, and faded-document reached neither region on any of them.
