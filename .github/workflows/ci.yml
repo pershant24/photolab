@@ -81,6 +81,10 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.event.after }}
+          # The event declares a force push. Object-store presence cannot: a
+          # force push is precisely what makes the previous tip unreachable, and
+          # fetch-depth: 0 fetches what is reachable from a ref, not orphans.
+          PUSH_FORCED: ${{ github.event.forced }}
         run: |
           set -euo pipefail
           FORBIDDEN="$(cat "$RUNNER_TEMP/forbidden.txt")"
@@ -105,23 +109,40 @@ jobs:
               echo "Case: branch creation. Checking only ${after}."
               revs="$(git rev-list -n 1 "$after")"
 
+            elif [ "${PUSH_FORCED:-}" = true ]; then
+              # Force push, as declared by the event rather than inferred.
+              #
+              # The inference used to come first and was wrong in this exact
+              # case. It reasoned that with fetch-depth: 0 every commit is
+              # present, so a missing previous tip must be a shallow checkout —
+              # but fetch-depth: 0 fetches what is reachable from a ref, and a
+              # force push is what makes the old tip unreachable. So the strict
+              # branch fired on ordinary force pushes and the force-push branch
+              # below it could never be reached with the tip absent. Found by a
+              # force push to a branch, not by reading.
+              #
+              # ${before}..${after} is not a meaningful range either way.
+              echo "Case: force push (github.event.forced). Checking only ${after}."
+              revs="$(git rev-list -n 1 "$after")"
+
             elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-              # Not a fallback. With fetch-depth: 0 every reachable commit is
-              # present, so a missing previous tip means the checkout or a fetch
-              # in this job has shallowed the repository. Falling back here would
-              # leave every commit below the tip unchecked while reporting green.
+              # Now genuinely a fault. The event says this was not forced, so the
+              # previous tip is still reachable from a ref and must be present.
+              # Falling back here would leave every commit below the tip
+              # unchecked while reporting green.
               echo "::error::Previous tip ${before} is not in the object store."
-              echo "This is a configuration fault, not a force push. With fetch-depth: 0 the"
-              echo "commit must be present, so either actions/checkout is not fetching full"
-              echo "history or a --depth fetch in this job has grafted it."
+              echo "The event does not report a force push, so this is a configuration fault."
+              echo "With fetch-depth: 0 the commit must be present, so either actions/checkout"
+              echo "is not fetching full history or a --depth fetch in this job has grafted it."
               echo "Refusing to degrade to a tip-only check, which would silently leave the"
               echo "rest of this push unexamined."
               exit 1
 
             elif ! git merge-base --is-ancestor "$before" "$after" 2>/dev/null; then
-              # Genuine force push: the previous tip is present but was rewritten
-              # away, so ${before}..${after} is not a meaningful range.
-              echo "Case: force push. ${before} is present but is not an ancestor of ${after}."
+              # The tip is present but was rewritten away. The event did not call
+              # it a force push, so this is a history rewrite arriving some other
+              # way; the range is still not meaningful.
+              echo "Case: rewritten history. ${before} is present but is not an ancestor of ${after}."
               echo "Checking only ${after}."
               revs="$(git rev-list -n 1 "$after")"
 

@@ -71,6 +71,30 @@ A commit message naming the file `CLAUDE.md` will therefore be rejected. This is
 a deliberate consequence of a guard with no exceptions: refer to it as "the
 project instructions file" in commit messages.
 
+### The commit identity has to match the account, and this was found the hard way
+
+The pattern also matches `co-authored-by` with no exception for a human one, and
+GitHub adds exactly that trailer on a squash-merge whenever the branch's commits
+were authored under an address the merging account does not own. Local commits
+used `ppershant@yahoo.com`; the account merges as
+`74086151+pershant24@users.noreply.github.com`; GitHub read those as two people
+and credited the second in a trailer nobody typed.
+
+**That turned `main` red on the merge of #3**, and it is the first time the
+`push`-event job has caught something the pull-request job structurally could
+not — the trailer does not exist until the merge dialog composes it. The
+mechanism the table above claims for that trigger is therefore no longer only
+theoretical.
+
+The fix is `git config user.email 74086151+pershant24@users.noreply.github.com`
+in this repository, so GitHub sees one identity and adds no trailer. The rule
+stays absolute rather than being narrowed to AI co-authors: an exception for
+"genuine" co-authors is a judgement the guard would have to make about an
+address, which is exactly the kind of exception this guard exists not to have.
+
+A fresh clone needs that `user.email` as well as the `core.hooksPath` in the
+README, and for the same reason — neither is carried in the repository.
+
 ---
 
 ## 2. The renderer is a pure function
