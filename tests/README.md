@@ -1837,3 +1837,180 @@ out-of-gamut counts were inflated and their exact numbers are not quoted here.
 What did carry across all four, and is worth having: the ordering of grades was
 the same, the in-gamut population outweighed the out-of-gamut one on every frame
 and grade, and faded-document reached neither region on any of them.
+
+## The gamut gate
+
+The census above said the compressor's defect was in its **trigger**, not its
+operator: `distance` measures saturation and was being read as though it
+measured excursion. This is that change, and the two things it turned up that
+were not in the plan.
+
+### The gate, and the assertion it earns
+
+The trigger is now a negative channel after the display matrix. A colour inside
+the display primaries is returned exactly.
+
+That is written as an assertion rather than a measurement, which is the point of
+doing it: **an in-gamut colour is unchanged, bit for bit**, at any threshold,
+over a dense sweep of the cube and at every named boundary case. It is the same
+standard white balance meets at neutral (the pass is skipped) and HSL meets at
+neutral (bit-exact through the `mix` form). Until now the compressor was the only
+pass in the pipeline that altered an unedited photograph.
+
+`display.ts` used to carry an argument for why that guarantee was unreachable —
+a pure display primary sits at distance 1.0, so any smooth curve must start below
+1.0 and touch it. The argument is valid. Its premise, that the trigger had to be
+that distance, was not.
+
+**Watched fail.** Reverting to the distance trigger fails the new assertion on
+`[1, 0, 0]`, which comes back `[1, 0.05, 0.05]` — the "0.05 of its own achromatic
+value" the old comment disclosed as the accepted cost, now a test failure rather
+than a footnote. The dense sweep also catches `[0, 0, 1e-7]`, where a nearly
+black pixel had its red channel lifted off zero.
+
+### The gate broke the operator, and the algebra says it had to
+
+The gate alone was not shippable, and the census-agreement spec is what caught
+it: the composed chain and the renderer went from agreeing within 1 code value to
+disagreeing by **108**.
+
+Diagnosed rather than guessed. Dumping every disagreement over 2 code values and
+bucketing by how close the smallest channel was to zero:
+
+| \|min channel\| | pixels | worst |
+|---|---|---|
+| < 1e-4 | 226 | 104 |
+| 1e-4 .. 1e-3 | 14 | 108 |
+| 1e-3 .. 1e-2 | 1 | 3 |
+| ≥ 1e-2 | **0** | — |
+
+240 of 241 sat within 1e-3 of the boundary. Half float carries about three
+decimal digits, so the GPU and Node disagree about the *sign* of a channel that
+close to zero — one compresses and the other does not.
+
+The sign disagreement is inherent to gating on a sign. What made it cost 108 code
+values was the shoulder. With a knee at `k` the operator steps by `(1 - k) / 2`
+the instant a channel crosses zero, **however small the crossing**: at `k = 0.9`
+that is 0.05 of the achromatic value, so a pixel 0.00006 outside the gamut with an
+achromatic value of 2.75 moved 104 code values. Measured directly: a change of
+**1e-12** in the input produced a **63 code value** jump in the output.
+
+The step vanishes only at `k = 1`, and at `k = 1` the shoulder degenerates to the
+constant 1 — which is `scale = 1 / distance`. So with a gate, a soft shoulder and
+continuity are mutually exclusive, and the operator is forced:
+
+    scale = 1 / distance          desaturate to the boundary, no further
+
+The property that matters is not continuity for its own sake but the bound it
+implies:
+
+    |change| <= |excursion|
+
+A colour a hair outside the gamut moves a hair, so disagreement about a near-zero
+sign costs a near-zero difference. It also moves colours *less* than the shoulder
+did: the shoulder overshot to strictly inside the boundary, this lands on it.
+
+Re-measured after the change: disagreements over 20 code values went **20 to 0**,
+worst **108 to 3**, pixels differing by more than 2 went **241 to 4**. The
+agreement tolerance is set at 5 from that distribution, with the reason recorded
+in the spec — two precisions cannot agree on a sign test, and pretending
+otherwise by driving the number to 1 would be fitting the test to a wish.
+
+One consequence worth stating: the census needs an epsilon on "is this out of
+gamut" and **the operator does not**. The census counts pixels, so a round-trip
+error of 2.2e-16 counted as a whole pixel; the operator's effect is bounded by
+the excursion, so acting on 2.2e-16 changes the colour by 2.2e-16. The epsilon
+was only ever needed because the operator was ill-conditioned.
+
+### A correction to the published census
+
+The gate exposed an error in the previous section's method, and the numbers there
+are superseded by the table below.
+
+The in-gamut column was computed as the compressed path's hue shift against the
+unclamped colour, justified by "clipping does nothing here". The clamp does
+nothing on an in-gamut colour — **but the tone map does**. It is per channel, so
+it bleaches a bright saturated colour toward white and moves its hue. With the
+compressor gated off in gamut the old metric still reported a shift, which is how
+the mistake surfaced: it had been measuring the tone map and attributing it to
+compression.
+
+The compressor's contribution is now isolated against the same pipeline with
+compression switched off, so the tone map appears on both sides and cancels.
+
+### Before and after, same frame, one binary
+
+`tests/support/gamutCensus.ts` carries both operators and runs them over the same
+photograph in one pass, so this is a comparison rather than two logs. Percentages
+are of all pixels in the frame; the degree columns are fixed cut-offs so the two
+rows share a denominator.
+
+| grade | worse | ≥5° | ≥15° | in-gamut touched | in-gamut visible |
+|---|---|---|---|---|---|
+| neutral | 0 → 0 | 0 → 0 | 0 → 0 | 1.65% → 0.15% | **0.197% → 0** |
+| soft-portrait | 0.022% → 0.001% | 0 → 0 | 0 → 0 | 2.37% → **0** | 0.021% → 0 |
+| teal-orange | 1.85% → 0.86% | 0.270% → 0.122% | 0.026% → 0.018% | 14.28% → **0** | **0.961% → 0** |
+| faded-document | 0 → 0 | 0 → 0 | 0 → 0 | 0.03% → **0** | 0 → 0 |
+| night-push | 1.47% → 0.34% | 0.139% → 0.071% | 0.022% → 0.022% | 12.33% → **0** | **0.687% → 0** |
+| teal-orange +0.3 sat | 6.48% → 3.82% | 1.149% → 0.709% | 0.226% → 0.130% | 17.36% → **0** | 1.396% → 0 |
+| soft-portrait +0.3 sat | 1.18% → 0.33% | 0.040% → **0** | 0 → 0 | 9.44% → **0** | 0.603% → 0 |
+| sat +0.3 only | 0.96% → 0.32% | 0.156% → **0** | 0 → 0 | 5.11% → **0** | 0.420% → 0 |
+| sat +0.5 only | 1.87% → 0.56% | 0.226% → 0.033% | 0 → 0 | 10.29% → **0** | 0.468% → 0 |
+| sat +1.0 only | 5.84% → 1.92% | 0.343% → 0.113% | 0.011% → 0.003% | 15.78% → **0** | 0.490% → 0 |
+| punchy +1.0 sat | 8.05% → 4.73% | 1.040% → 0.683% | 0.092% → 0.031% | 12.87% → **0** | 0.654% → 0 |
+| exposure +1.5, contrast 1.4 | 0.77% → 0.50% | 0.201% → 0.099% | 0.045% → 0.015% | 6.46% → **0** | 0.907% → 0 |
+
+**In-gamut harm is gone, exactly.** Every grade, zero pixels visibly shifted,
+maximum attributable shift 0.00°. That is the invariant holding on a photograph
+rather than on chosen colours.
+
+The one non-zero cell is `neutral`, at 0.15% touched and 0.00° shifted. Those are
+the matrix round-trip pixels sitting at -2.2e-16: below the census's 1e-9 epsilon
+so it files them as in gamut, genuinely negative so the operator acts. It changes
+them by 2.2e-16. This is the bound doing its job, and it is why the operator
+needs no epsilon of its own.
+
+**Out-of-gamut harm roughly halved as well**, which was not the aim. Minimal
+desaturation moves colours less than the overshooting shoulder did, so it wins on
+the contested population too — at every fixed severity, on every grade.
+
+### Does the operator still need work? Partly, and less than before
+
+The p99 columns rise in two rows — night-push from 20.5° to 41.9° — and that is a
+composition effect, not new harm. The p99 is taken over the pixels that are
+worse, and that set shrank to roughly its own tail. The fixed cut-offs are
+immune to this and they fall or hold everywhere, and the **maxima are unchanged**
+at 61.4°, 63.8° and 67.1° — no colour is harmed more than it was.
+
+So, to the question the brief asked:
+
+- **The gate settles the in-gamut half completely.** Not "within a bound":
+  exactly, and asserted.
+- **It does not fix the tail** on colours that genuinely need compression. The
+  worst single shift is unchanged, and the Stage 9 conclusion about hue-varying
+  thresholds was measured on a population that included in-gamut colours, so it
+  should be treated as unverified rather than as still standing.
+- **The residual is small and now well-localised.** On the shipping presets,
+  0.018–0.022% of the frame is harmed by 15° or more — about one pixel in five
+  thousand. On the most aggressive grade the control offers, 0.13%.
+
+My recommendation is that further operator work is **not** justified on this
+evidence. The remaining harm is two orders of magnitude below what the gate
+removed, and a constant-hue-path compressor is a root-find per pixel in a shader
+— a large complexity increase for a residual this size. The case to revisit it is
+if a wider frame set shows those pixels *clustered* rather than scattered, since
+a hundred adjacent wrong pixels read as an artefact where a thousand scattered
+ones do not. That is a measurement, and it belongs with the frame-set widening
+rather than here.
+
+### What the goldens did not catch
+
+Every golden test passed unchanged, including the two-resolution invariant and
+tile overlap, both before and after this change — including while the operator
+had a 63-code-value cliff in it.
+
+That is worth recording as a limitation of the fixtures rather than as
+reassurance. The golden frames are synthetic gradients and patches; they do not
+put pixels within 1e-3 of the gamut boundary, which is where all of this lives.
+The defect was found by a census on a photograph and by an agreement test between
+two precisions, and neither of those is a golden image.

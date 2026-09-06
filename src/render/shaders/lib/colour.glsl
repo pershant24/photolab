@@ -200,18 +200,37 @@ vec3 toneMap(vec3 linearSrgb, float knee) {
 // so its direction — the hue — is unchanged and only saturation falls. Doing
 // this per channel instead shifts hue, sometimes further than clipping does;
 // display.ts records the measurement.
+// Mirrors gamutCompressRgb in src/core/colour/display.ts, including the gate.
 vec3 gamutCompress(vec3 linearSrgb, float threshold) {
+    // THE GATE. No negative channel means the colour is inside the display
+    // primaries, and it is returned as it arrived. `threshold` used to decide
+    // this, on a distance that measures saturation rather than excursion, which
+    // is why the compressor used to alter colours that were never out of gamut.
+    float lowest = min(linearSrgb.r, min(linearSrgb.g, linearSrgb.b));
+    if (lowest >= 0.0) {
+        return linearSrgb;
+    }
+
     float achromatic = max(linearSrgb.r, max(linearSrgb.g, linearSrgb.b));
     if (achromatic <= 0.0) {
         return linearSrgb;
     }
 
+    // Greater than 1 by construction past the gate: `lowest` is negative and
+    // `achromatic` is positive. `threshold` is the shoulder's knee now, not a
+    // trigger.
     vec3 distances = (vec3(achromatic) - linearSrgb) / achromatic;
     float distance = max(distances.r, max(distances.g, distances.b));
+    // Unreachable at any threshold at or below 1. Kept so a threshold above 1
+    // returns the colour exactly rather than scaling it by 1 and rounding.
     if (distance <= threshold) {
         return linearSrgb;
     }
 
-    float scale = shoulder(distance, threshold, 1.0) / distance;
+    // 1/distance, not the shoulder: desaturate by exactly enough to reach the
+    // boundary. Bounds the change by the excursion, which is what stops a
+    // near-zero channel crossing zero from costing 100 code values. See
+    // gamutCompressRgb in src/core/colour/display.ts.
+    float scale = 1.0 / distance;
     return vec3(achromatic) + scale * (linearSrgb - vec3(achromatic));
 }

@@ -7,6 +7,7 @@ import {
   displayTransform,
   displayTransformIdentity,
   gamutCompressRgb,
+  isOutOfGamut,
   toneMapChannel,
   toneMapRgb,
 } from '../../src/core/colour/display'
@@ -99,17 +100,86 @@ describe('tone map', () => {
 })
 
 describe('gamut compression', () => {
-  it('leaves colours within the threshold distance exactly unchanged', () => {
-    // Exactly, not approximately: below the threshold the compression is the
-    // identity, so an ordinary photograph is untouched by it.
-    for (const rgb of [
+  /**
+   * The invariant the gate earns, and the reason the gate exists.
+   *
+   * This is an assertion, not a measurement. It is the same standard white
+   * balance meets at neutral (the pass is skipped) and HSL meets at neutral
+   * (bit-exact through the `mix` form), and until the trigger changed the
+   * compressor was the one pass that could not meet it — it was the only thing
+   * in the pipeline that altered an unedited photograph.
+   *
+   * "In gamut" is a negative-channel test and nothing else. Saturation is not
+   * the same question: a pure display primary has a channel at exactly zero and
+   * is perfectly displayable, and it is the case the old trigger got wrong.
+   */
+  it('returns every in-gamut colour exactly, including at the boundary', () => {
+    const cases: Vec3[] = [
+      // The ones the distance trigger moved. Each sits at distance 1.0.
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 1, 0],
+      [0, 1, 1],
+      [1, 0, 1],
+      // Saturated but not primary, either side of the old 0.9 threshold.
+      [1, 0.05, 0.05],
+      [1, 0.09, 0.2],
+      [1, 0.1, 0.1],
+      [1, 0.11, 0.11],
+      // Bright and saturated: in gamut, far above display white.
+      [40, 0, 0],
+      [3, 0.1, 0.1],
+      [65504, 1, 1],
+      // Ordinary photographic colours, neutrals, and black.
       [0.5, 0.5, 0.5],
       [0.2, 0.18, 0.22],
       [0.8, 0.5, 0.3],
       [1, 0.5, 0.5],
       [0, 0, 0],
+      // Exactly zero in one channel is in gamut; the gate must not read `<= 0`.
+      [0.4, 0, 0.4],
+    ]
+    for (const rgb of cases) {
+      // Compared against a copy, so this cannot pass by returning the argument
+      // and never looking at it.
+      const expected: Vec3 = [rgb[0], rgb[1], rgb[2]]
+      expect(isOutOfGamut(rgb), `${rgb.join(', ')} should be in gamut`).toBe(false)
+      expect(gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD), rgb.join(', ')).toEqual(expected)
+    }
+  })
+
+  it('returns every in-gamut colour exactly, over a dense sweep', () => {
+    // The named cases above are the interesting ones; this is the claim made
+    // general. Every triple on a 25-step grid from black to well past display
+    // white, at several thresholds, must come back bit for bit.
+    const steps = [0, 1e-7, 0.001, 0.05, 0.18, 0.5, 0.9, 1, 1.5, 8, 300]
+    for (const threshold of [0.5, GAMUT_COMPRESS_THRESHOLD, 0.99, 1]) {
+      for (const r of steps) {
+        for (const g of steps) {
+          for (const b of steps) {
+            const rgb: Vec3 = [r, g, b]
+            const out = gamutCompressRgb(rgb, threshold)
+            expect(out[0], `r of ${rgb.join(', ')} at ${threshold}`).toBe(r)
+            expect(out[1], `g of ${rgb.join(', ')} at ${threshold}`).toBe(g)
+            expect(out[2], `b of ${rgb.join(', ')} at ${threshold}`).toBe(b)
+          }
+        }
+      }
+    }
+  })
+
+  it('still acts on every colour that is genuinely out of gamut', () => {
+    // The other half. A gate that never opens would pass the test above and be
+    // useless, so the population it does admit is asserted here.
+    for (const rgb of [
+      [1, -1e-9, 0.5],
+      [1, -0.05, -0.4],
+      [0.4, -0.9, 0.2],
+      [2, 0.1, -4],
     ] as Vec3[]) {
-      expect(gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)).toEqual(rgb)
+      expect(isOutOfGamut(rgb)).toBe(true)
+      expect(gamutCompressRgb(rgb, GAMUT_COMPRESS_THRESHOLD)).not.toEqual(rgb)
     }
   })
 
@@ -406,6 +476,21 @@ describe('the assembled display transform', () => {
     // With both stages on, the clamp is a safety net rather than something the
     // image depends on: compression removes the negatives and the shoulder is
     // bounded below 1.
+    //
+    // The lower bound is `-FLOOR` rather than 0, and the reason is a real change
+    // rather than a tolerance quietly loosened. The compressor used to overshoot
+    // — the shoulder mapped an out-of-gamut distance to strictly inside the
+    // boundary — so its output was comfortably positive. It now desaturates by
+    // exactly enough to reach the boundary and no further, which is what bounds
+    // its change by the excursion and stops a near-zero channel crossing zero
+    // from costing 100 code values. Landing *on* zero means arithmetic can leave
+    // the channel a few ulp below it: measured at -1.8e-15, which is 8 orders
+    // inside a single 8-bit code value and encodes to 0 either way.
+    //
+    // So the claim in the title still holds in the sense that matters — no pixel
+    // depends on the clamp for its value — and the bound says what is actually
+    // true instead of what was true of a different operator.
+    const FLOOR = 1e-12
     for (const acescg of [
       [40, 0.2, 0.001],
       [0, 12, 0],
@@ -416,8 +501,10 @@ describe('the assembled display transform', () => {
       const compressed = gamutCompressRgb(linear, GAMUT_COMPRESS_THRESHOLD)
       const mapped = toneMapRgb(compressed, TONE_MAP_KNEE)
       for (let c = 0; c < 3; c++) {
-        expect(mapped[c], `channel ${c}`).toBeGreaterThanOrEqual(0)
+        expect(mapped[c], `channel ${c}`).toBeGreaterThanOrEqual(-FLOOR)
         expect(mapped[c], `channel ${c}`).toBeLessThan(1)
+        // The part that would matter to a picture: it encodes inside the range.
+        expect(Math.round(srgbOetf(Math.min(1, Math.max(0, mapped[c]!))) * 255)).toBeGreaterThanOrEqual(0)
       }
     }
   })

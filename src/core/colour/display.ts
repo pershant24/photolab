@@ -159,23 +159,34 @@ import { mat3MulVec3 } from './types'
 export const TONE_MAP_KNEE = 0.85
 
 /**
- * Distance from the achromatic axis, as a fraction of the achromatic value, at
- * and below which gamut compression is the identity.
+ * The knee of the shoulder that pulls an out-of-gamut colour back, expressed as
+ * a distance from the achromatic axis in units of the achromatic value.
  *
- * A note on what this can and cannot promise. It is often stated that gamut
- * compression should leave in-gamut colours unchanged, and that cannot hold for
- * *all* of them. A colour with a channel at exactly zero — a pure display
- * primary — sits at distance 1.0, which is the same place the compression must
- * be already working if it is to pull negative channels back. Any smooth curve
- * that maps distances above some threshold into a bounded range must therefore
- * start below 1.0 and touch the most saturated in-gamut colours.
+ * # This used to be the trigger, and that was the defect
  *
- * So the honest guarantee is the one asserted in the tests, and it is narrower
- * than "in-gamut colours are unchanged": **colours within this distance are
- * unchanged exactly**, and beyond it the change grows smoothly. At a threshold
- * of 0.9 that covers everything up to nine tenths of the way to the gamut
- * boundary. Beyond it, a pure display primary — which is in gamut — moves by
- * **0.05 of its own achromatic value**, measured, not implied.
+ * The comment here used to argue that "in-gamut colours are unchanged" could
+ * not hold for all of them, because a pure display primary sits at distance 1.0
+ * — the same region the compression must already be working in — so any smooth
+ * curve had to start below 1.0 and touch the most saturated in-gamut colours.
+ * The argument is sound. Its premise was not: it assumed the *trigger* had to be
+ * this distance.
+ *
+ * It did not, and the cost of assuming so was measured rather than argued. On a
+ * real photograph the largest population of colours the compressor harmed was
+ * one that had never left the gamut — `distance` measures saturation, and it was
+ * being read as though it measured excursion. A neutral edit with no grade at
+ * all moved 0.23% of a frame. `tests/README.md` carries the census.
+ *
+ * The trigger is now an actual out-of-gamut condition — a negative channel after
+ * the display matrix — and this value only decides *how hard* something already
+ * outside is pulled back. That makes the strong guarantee reachable, and it is
+ * asserted rather than measured: **an in-gamut colour is returned exactly**, the
+ * same standard white balance and HSL meet at neutral. A pure display primary is
+ * now untouched, where it used to move by 0.05 of its own achromatic value.
+ *
+ * Note what this implies about the number itself. Past the gate, `distance` is
+ * always greater than 1, so nothing in the application's range can make this a
+ * trigger again by accident.
  */
 export const GAMUT_COMPRESS_THRESHOLD = 0.9
 
@@ -312,20 +323,63 @@ export function toneMapRgb(rgb: Vec3, knee: number): Vec3 {
  * The achromatic value is the largest channel, so it is itself unmoved and the
  * colour never darkens as a side effect of being brought into gamut.
  */
+export function isOutOfGamut(rgb: Vec3): boolean {
+  return rgb[0] < 0 || rgb[1] < 0 || rgb[2] < 0
+}
+
 export function gamutCompressRgb(rgb: Vec3, threshold: number): Vec3 {
+  // THE GATE. A colour with no negative channel is inside the display
+  // primaries and is returned as it arrived, exactly.
+  if (!isOutOfGamut(rgb)) return rgb
+
   const achromatic = Math.max(rgb[0], rgb[1], rgb[2])
-  // Nothing to compress toward: the colour is black or entirely negative, and
-  // the encode's clamp is the right place to resolve it.
+  // Nothing to compress toward: the colour is entirely negative, and the
+  // encode's clamp is the right place to resolve it.
   if (achromatic <= 0) return rgb
 
+  // Equal to `(achromatic - min) / achromatic`, and **greater than 1 by
+  // construction** now that the gate has run: `min` is negative and
+  // `achromatic` is positive. The threshold is therefore no longer a trigger.
+  // It survives as the shoulder's knee, which is what decides how hard a
+  // colour past the boundary is pulled back.
   const distance = Math.max(
     (achromatic - rgb[0]) / achromatic,
     (achromatic - rgb[1]) / achromatic,
     (achromatic - rgb[2]) / achromatic,
   )
+  // Unreachable for any threshold at or below 1, which is every threshold the
+  // application uses. Kept so that a threshold above 1 returns the colour
+  // exactly rather than multiplying it by a scale of 1 and rounding.
   if (distance <= threshold) return rgb
 
-  const scale = shoulder(distance, threshold, 1) / distance
+  /*
+   * `1 / distance`, and not the shoulder this used to use. The shoulder is
+   * ill-conditioned once the trigger is a sign test, and that was measured
+   * rather than reasoned about.
+   *
+   * With a knee at `k`, the operator steps by `(1 - k) / 2` the instant a
+   * channel crosses zero, *however small the crossing is*. At k = 0.9 that is
+   * 0.05 of the achromatic value — so a pixel 0.00006 outside the gamut with an
+   * achromatic value of 2.75 moves by 104 code values. Half float and float64
+   * do not agree on the sign of a channel within about 1e-3 of zero, so the two
+   * implementations of this pipeline disagreed on 241 pixels of a real frame,
+   * by up to 108 code values. Measured, in `tests/README.md`.
+   *
+   * `1 / distance` desaturates by exactly enough to reach the gamut boundary
+   * and no further, which gives the property the shoulder lacked:
+   *
+   *     |change| <= |excursion|
+   *
+   * A colour a hair outside the gamut moves a hair. Disagreement about the sign
+   * of a near-zero channel therefore costs a near-zero difference, and the
+   * boundary stops being a cliff. It is also the *only* continuous choice here:
+   * the step is `(1 - k) / 2`, which vanishes only at k = 1, and at k = 1 the
+   * shoulder degenerates to the constant 1 — which is this.
+   *
+   * It moves colours less than the shoulder did, not more. The shoulder mapped
+   * distances to strictly inside the boundary, overshooting; this lands on it.
+   */
+  const scale = 1 / distance
   return [
     achromatic + scale * (rgb[0] - achromatic),
     achromatic + scale * (rgb[1] - achromatic),
