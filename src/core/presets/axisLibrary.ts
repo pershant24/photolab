@@ -69,10 +69,14 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
     // the whole reason grain size is a camera parameter. Optically clean: a
     // slight falloff and essentially no distortion.
     patch: {
-      distortion: -0.012,
+      // Pincushion, where every other camera here barrels. Measured at 9.3 p90
+      // against the original when it barrelled slightly, which is a weak preset;
+      // the direction is what makes it read as a different lens rather than as a
+      // smaller amount of the same one.
+      distortion: 0.03,
       aberration: 0.0004,
-      vignette: 0.16,
-      grainSize: 0.0006,
+      vignette: 0.14,
+      grainSize: 0.0005,
     },
   },
   {
@@ -84,11 +88,14 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
     // falloff, aberration you can see without looking, and a coarse grain scale
     // because these cameras were 35mm shot on fast film.
     patch: {
-      distortion: -0.22,
+      distortion: -0.16,
       aberration: 0.0062,
-      vignette: 0.78,
-      diffusionStrength: 0.22,
-      diffusionRadius: 0.014,
+      vignette: 0.74,
+      // Pulled back from 0.22. At the higher value the frame read as smeared
+      // rather than as a cheap lens, and combined with a lifted grade it lost
+      // the hillside entirely.
+      diffusionStrength: 0.15,
+      diffusionRadius: 0.012,
       grainSize: 0.0019,
     },
   },
@@ -106,7 +113,11 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
       vignette: 0.24,
       diffusionStrength: 0.42,
       diffusionRadius: 0.018,
-      grainSize: 0.0009,
+      // Was 0.0009, which is the default, so it was dropped as carrying nothing
+      // and the preset made no format claim at all. Caught by the assertion that
+      // a shipped preset survives sanitising unchanged. A portrait lens of this
+      // kind sits on a larger negative than a pocket compact, so it says so.
+      grainSize: 0.0007,
     },
   },
 ]
@@ -118,6 +129,16 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
  * plus the two things that are properties of the film rather than of the camera
  * — how much it halates, and how much grain it carries at its speed.
  */
+/*
+ * None of these declares `filmStrength`, and that is deliberate rather than an
+ * omission. Its default is 1 — full strength — so a stock setting it to 1 sets
+ * nothing: `sanitisePatch` drops any value equal to the default, because a sparse
+ * preset stores differences. Two presets here shipped a key that said nothing
+ * before the assertion that a shipped preset survives sanitising unchanged
+ * caught them.
+ *
+ * A stock wanting less than full strength would say so; these want all of it.
+ */
 export const STOCK_PRESETS: readonly AxisPreset[] = [
   {
     id: 'stock-warm-portrait',
@@ -126,11 +147,10 @@ export const STOCK_PRESETS: readonly AxisPreset[] = [
     builtIn: true,
     patch: {
       ...stockPatch('warm-portrait'),
-      filmStrength: 0.8,
-      halationStrength: 0.32,
-      halationThreshold: 2.05,
-      halationRadius: 0.005,
-      grainStrength: 0.3,
+      halationStrength: 0.24,
+      halationThreshold: 2.2,
+      halationRadius: 0.004,
+      grainStrength: 0.22,
     },
   },
   {
@@ -140,11 +160,17 @@ export const STOCK_PRESETS: readonly AxisPreset[] = [
     builtIn: true,
     patch: {
       ...stockPatch('punchy-reversal'),
-      filmStrength: 0.85,
-      halationStrength: 0.5,
-      halationThreshold: 1.95,
-      halationRadius: 0.007,
-      grainStrength: 0.26,
+      // Halation is doing the separating here, and deliberately. At full film
+      // strength the three stocks' characteristic curves still measured only 6
+      // apart at p90 on the test frame: the crossover between them is real but
+      // gentle, and a midtone-dominated frame barely shows it. Halation is a
+      // property of the film base rather than of the curves, so pushing it is
+      // legitimate rather than a workaround -- a reversal stock on a clear base
+      // halates far more than a masked colour negative.
+      halationStrength: 0.85,
+      halationThreshold: 1.45,
+      halationRadius: 0.009,
+      grainStrength: 0.3,
     },
   },
   {
@@ -156,8 +182,7 @@ export const STOCK_PRESETS: readonly AxisPreset[] = [
     // to reflect back off the base, and adding a glow to it fights the look.
     patch: {
       ...stockPatch('muted-documentary'),
-      filmStrength: 0.9,
-      grainStrength: 0.52,
+      grainStrength: 0.66,
     },
   },
 ]
@@ -182,9 +207,12 @@ export const GRADE_PRESETS: readonly AxisPreset[] = [
     builtIn: true,
     patch: {
       contrast: 1.16,
-      lift: [-0.012, 0.002, 0.016],
-      gain: [0.018, 0.004, -0.014],
-      hslSaturation: [0.08, 0.12, 0, 0, -0.12, 0],
+      // Complementary: shadows toward teal, highlights toward warm. Pushed
+      // further than the first attempt so it separates from a warm scan, which
+      // is a cast rather than a split.
+      lift: [-0.02, 0.003, 0.026],
+      gain: [0.026, 0.005, -0.022],
+      hslSaturation: [0.1, 0.16, -0.04, -0.06, -0.16, -0.02],
     },
   },
   {
@@ -212,12 +240,17 @@ export const GRADE_PRESETS: readonly AxisPreset[] = [
     // yellow-green highlights, with the crossover exaggerated well past
     // anything an ordinary grade would do.
     patch: {
-      contrast: 1.5,
-      lift: [-0.022, 0.004, 0.03],
-      gain: [0.026, 0.02, -0.03],
-      hslSaturation: [0.2, 0.25, 0.3, 0.15, 0.1, 0.15],
-      splitShadowTint: [-0.012, 0.004, 0.018],
-      splitHighlightTint: [0.016, 0.012, -0.02],
+      // Pulled back hard from the first attempt, which measured 44 at p90 where
+      // every other grade sat under 12. It did not read as a process, it read as
+      // a fault: the sky blew to cream and the greens went electric. Cross
+      // processing is extreme, but a preset nobody would apply twice is not a
+      // preset.
+      contrast: 1.28,
+      lift: [-0.012, 0.002, 0.018],
+      gain: [0.016, 0.012, -0.018],
+      hslSaturation: [0.1, 0.14, 0.16, 0.08, 0.05, 0.08],
+      splitShadowTint: [-0.007, 0.002, 0.011],
+      splitHighlightTint: [0.009, 0.007, -0.012],
       splitBalance: -0.4,
     },
   },
@@ -258,10 +291,14 @@ export const GRADE_PRESETS: readonly AxisPreset[] = [
     // The other operator, the same negative. Paired with the one above so the
     // difference between them is legible as a scan decision.
     patch: {
-      contrast: 1.12,
-      lift: [0.004, 0, -0.004],
-      gain: [0.012, 0.004, -0.01],
-      splitHighlightTint: [0.01, 0.004, -0.008],
+      // Deliberately carries no complementary lift/gain. The first version did,
+      // in the same direction as the teal-and-orange grade, and the two measured
+      // 5.6 apart at p90 — two names for one look. What distinguishes a warm scan
+      // is tone and an overall cast, so that is all it does.
+      contrast: 1.2,
+      toneMapKnee: 0.8,
+      splitShadowTint: [0.008, 0.003, -0.006],
+      splitHighlightTint: [0.016, 0.008, -0.014],
       splitBalance: 0.6,
     },
   },
@@ -308,6 +345,10 @@ export const BUNDLES: readonly Bundle[] = [
     name: 'Expired film, plastic lens',
     builtIn: true,
     components: ['camera-plastic-lens', 'stock-muted-documentary', 'grade-faded-matte'],
-    override: { grainStrength: 0.62 },
+    // Three components that each soften: a diffusing lens, a flat stock and a
+    // lifted grade. Alone each is fine and together they erased the hillside, so
+    // the trim belongs to the combination rather than to any of them. This is
+    // the case the override layer exists for.
+    override: { contrast: 0.97, lift: [0.009, 0.009, 0.008], grainStrength: 0.6 },
   },
 ]

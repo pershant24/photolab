@@ -16,6 +16,7 @@ import { AXIS_PRESETS, BUNDLES } from '../../src/core/presets/axisLibrary'
 import { DEFAULT_EDIT_STATE, editStatesEqual, mergeEditState } from '../../src/core/state/editState'
 import type { EditState } from '../../src/core/state/editState'
 import { createEditorStore } from '../../src/core/state/editorStore'
+import { borrowedTrademark } from '../support/trademarks'
 
 /**
  * The axis split, and the property that makes it worth having.
@@ -117,19 +118,13 @@ describe('every shipped axis preset stays inside its axis', () => {
     // Third time this rule has been written down and the first time the
     // repository is public, so it is asserted rather than trusted. Naming a
     // preset after a trademark is a legal problem, not a taste problem.
-    // Word-bounded, and that is not a detail. The first version matched
-    // substrings and rejected "Soft portrait lens", because **Portra** is a
-    // substring of *portrait*. Same shape as the commit guard rejecting the word
-    // "claude" inside the project instructions filename: a guard with no
-    // exceptions catches innocent words that happen to contain a mark.
-    //
-    // Boundaries are the right fix rather than an allow-list, because an
-    // allow-list is a judgement that has to be maintained and a boundary is not.
-    const forbidden =
-      /\b(leica|contax|yashica|olympus|holga|lomo|portra|velvia|cinestill|kodak|fuji|fujifilm|ilford|canon|nikon|hasselblad|polaroid|instax|ektar|tri-?x)\b/i
+    // One shared list, in tests/support/trademarks.ts. It lives there because
+    // this check was written twice independently and both copies were first
+    // written as substring matches and both rejected the word "portrait" for
+    // containing a mark.
     for (const preset of [...AXIS_PRESETS, ...BUNDLES]) {
-      expect(forbidden.test(preset.name), `"${preset.name}" names a trademark`).toBe(false)
-      expect(forbidden.test(preset.id), `id "${preset.id}" names a trademark`).toBe(false)
+      expect(borrowedTrademark(preset.name), `"${preset.name}" names a trademark`).toBeNull()
+      expect(borrowedTrademark(preset.id), `id "${preset.id}" names a trademark`).toBeNull()
     }
   })
 })
