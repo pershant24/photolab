@@ -2014,3 +2014,85 @@ reassurance. The golden frames are synthetic gradients and patches; they do not
 put pixels within 1e-3 of the gamut boundary, which is where all of this lives.
 The defect was found by a census on a photograph and by an agreement test between
 two precisions, and neither of those is a golden image.
+
+## A new test must be verified to have increased the test count
+
+Three checks in this repository have passed by not running:
+
+| | what happened | how it was caught |
+|---|---|---|
+| Stage 2 | `tsc --noEmit` against a project-references orchestrator checked nothing | by accident, later |
+| Stage 10 | the 61MP export test exceeded its timeout and failed twice unnoticed | the headroom reporter, built afterwards |
+| Stage 11 | the census agreement spec read its inputs from a session-named scratch path, so it would have skipped on every machine forever | review, before it merged |
+
+Absence and success report identically. A skipped test, a test file the runner
+never collected, and a green suite all look the same from the outside, and in
+each of the three the surrounding document described the check in the present
+tense while it did nothing.
+
+**The rule: a new test must be verified to have increased the test count.** Run
+the suite before and after; the total must go up by the number of tests added.
+The gamut chain agreement spec was checked this way — 113 on the base commit,
+116 with it, which is exactly the three cases it contributes and is the only
+evidence that distinguishes "ran and passed" from "did not run".
+
+It is a mechanical check, which is the point. "Does this test look like it
+runs?" is a judgement, and the three above all looked fine.
+
+A related case, from the boundary work and worth recording because it is the
+same shape at a smaller scale: `tests/unit/boundaries.test.ts` passed under
+Vitest while `tsc --noEmit` rejected it, because indexing a `Vec3` with a loop
+variable is a type error the test runner never evaluates. Two tools, two
+answers, and the green one was the one being watched.
+
+## Boundaries: continuity is a unit-test claim, coverage is a fixture claim
+
+The gamut cliff survived every golden test because the synthetic fixtures
+contained no colours near the gate. Fixing that turned out to need two things
+rather than one, and separating them is the useful part.
+
+`tests/golden/boundaries.spec.ts` puts a fixture across every enumerated
+discontinuity, so each region is exercised by a real render. `tests/unit/
+boundaries.test.ts` probes each boundary at ±1e-9 and asserts the output moves
+by something of order epsilon.
+
+The split is forced by the source being 8-bit. Its values are a lattice of
+1/255, and refining a ramp does not refine the input — adjacent columns land on
+the same lattice point or the next one. So the largest adjacent-sample step in a
+render cannot distinguish a discontinuity from a place where the pipeline is
+merely **steep**. That is not hypothetical: the HSL sweep reads 31 code values
+with a correct operator, and it is the sRGB encode's slope near black, reached
+smoothly across four columns. Correct behaviour that looks exactly like the
+defect. In a unit test the input is a real number, epsilon can be 1e-9, and the
+two separate cleanly — a continuous boundary moves by order epsilon, a step
+moves by the step no matter how small epsilon gets.
+
+### Watched fail, and the fixture that did not work first time
+
+Reintroducing the shouldered operator behind the gate:
+
+| | correct | shouldered |
+|---|---|---|
+| unit probe, gamut gate at ±1e-9 | order 1e-9 | **0.05, at every epsilon** |
+| golden, gamut gate fixture | 18 | **107** |
+| golden, HSL band edges | 31 | **64** |
+
+The unit probe is decisive — the step is a constant the epsilon cannot shrink.
+
+The golden fixture took three attempts, and the failures are the instructive
+part. A full-saturation hue sweep read **7 with the correct operator and 3 with
+the broken one**: not merely insensitive to the defect it was built for, but
+pointing the wrong way. The cliff is 0.05 of the *achromatic* value and appears
+only on pixels within a hair of the boundary, so a fixture has to cross the
+boundary densely *and* at high brightness. The second attempt ramped from an
+already-saturated colour, so the entire ramp sat outside the gamut and never
+crossed at all — measured, rather than assumed, by printing the minimum channel
+along the ramp and finding zero crossings.
+
+The one that works ramps neutral to a primary, which guarantees exactly one
+crossing, with exposure raising the achromatic value at that crossing to 3.1.
+
+**A fixture built for a boundary is not automatically sensitive to a defect at
+that boundary, and the only way to know is to break the code and watch.** That
+is the general form of what "watch it fail" is for, and it is why the reintroduce
+step is worth doing rather than assuming the new test would have caught it.
