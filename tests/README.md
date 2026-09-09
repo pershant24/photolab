@@ -2192,3 +2192,63 @@ pinning its own edit rather than inheriting a default: **a measurement that
 reads its inputs from something people tune stops being reproducible the first
 time someone tunes it.** Verified by re-running the census after pinning and
 confirming every published figure is unchanged.
+
+## Assert occupancy rather than assuming it, and assert it as a count
+
+This project has now made the same mistake four times in four different places.
+The abstract statement of it has been in this file since Stage 7 and has not
+prevented the next instance, so here it is with all four named.
+
+| where | the assumption | what it cost |
+|---|---|---|
+| A parameter domain | the tone curve's x axis runs to ACEScct 1.0 | most of the domain held no pixels, so most of the control did nothing |
+| A test's input space | a hue bound measured over the narrow region white balance reaches, then stated generally | HSL can push any hue, and the bound did not survive contact with it |
+| A golden fixture | the synthetic gradients cover the pipeline | none of them held a colour near the gamut gate, and a 63 code value cliff shipped |
+| A comparison metric | mean ΔE says how different two looks are | two thirds of the frame is hillside the looks barely touch, so the mean said 2.4 where the eye said obviously different |
+
+The shape is identical every time: **a population was assumed to cover the thing
+being measured, and it did not.** Parameters, inputs, fixtures, and now the
+denominator of a statistic.
+
+**The rule: assert occupancy as a count, not as a belief.** The count differs by
+case and that is the whole point — it forces you to say what "covered" means
+here:
+
+- a **boundary fixture**: how many times does the ramp actually cross the
+  boundary? The second gamut fixture crossed it *zero* times, and printing that
+  number is what found it. Nothing about the fixture looked wrong.
+- a **parameter domain**: how many pixels of a real photograph land in each part
+  of it?
+- a **bound over a space**: does the sample reach the corners a later stage can
+  reach, or only the ones the fitting stage could?
+- a **metric**: what fraction of the population is actually affected? If it is
+  small, a mean over everything is measuring the unaffected part.
+
+### And a fixture is not automatically sensitive to the defect it was built for
+
+The other half of the same episode, and the more uncomfortable one. Three
+fixtures were written for the gamut boundary:
+
+1. A full-saturation hue sweep. Measured **7 with the correct operator and 3
+   with the broken one** — not merely insensitive, *pointing the wrong way*. A
+   green suite would have been reported as evidence the operator was fine.
+2. A ramp from an already-saturated colour. Never crossed the boundary at all.
+3. Neutral to a primary, at raised exposure. 18 correct, 107 broken.
+
+Only breaking the code distinguished them. "This fixture covers that boundary"
+is a claim about a fixture, and the only evidence for it is watching the fixture
+fail when the boundary is broken.
+
+## A duplicated guard does not inherit the original's fixes
+
+The trademark check existed in `presets.test.ts`, word-bounded, carrying a
+comment explaining that an earlier substring version had rejected the ordinary
+word *portrait* because a mark is inside it.
+
+A second one was written from scratch for the axis library and reproduced that
+bug exactly — same substring match, same word, same rejection. The scar was
+right there in the first copy and the second copy could not benefit from it.
+
+**Two copies of a rule are two chances to get it wrong and two places to fix
+it.** There is now one list, in `tests/support/trademarks.ts`, used by both. The
+consolidation is the small part; the reason is worth keeping.

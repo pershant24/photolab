@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 
 import { AXIS_PRESETS, BUNDLES } from '../core/presets/axisLibrary'
-import { PRESET_AXES, resolveBundle } from '../core/state/axes'
+import { PRESET_AXES, axisResetPatch, resolveBundle } from '../core/state/axes'
 import { editorStore } from '../core/state/editorStore'
 import {
   PresetFormatError,
@@ -93,12 +93,12 @@ export function Presets() {
     }
   }, [])
 
-  const row = (preset: Preset, deletable: boolean) => (
+  const row = (preset: Preset, deletable: boolean, patch?: Partial<EditState>) => (
     <li key={preset.id} className="flex items-center gap-2 py-0.5">
       <button
         type="button"
         data-testid={`apply-${preset.id}`}
-        onClick={() => apply(preset)}
+        onClick={() => (patch ? applyPatch(patch) : apply(preset))}
         className="min-w-0 flex-1 truncate text-left text-ink hover:underline"
       >
         {preset.name}
@@ -160,7 +160,11 @@ export function Presets() {
           <div className="mb-1 text-ink-dim capitalize">{axis}</div>
           <ul data-testid={`${axis}-list`}>
             {AXIS_PRESETS.filter((preset) => preset.axis === axis).map((preset) =>
-              row(preset, false),
+              // The axis is replaced rather than merged onto, so switching from
+              // one camera to another cannot leave the first one's diffusion
+              // behind. `applyAxisPreset` carries the reasoning; the same patch
+              // is built here so it stays one history entry.
+              row(preset, false, { ...axisResetPatch(axis), ...preset.patch }),
             )}
           </ul>
         </div>

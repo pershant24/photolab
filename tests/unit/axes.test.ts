@@ -5,6 +5,7 @@ import {
   PHOTOGRAPH_PARAMETERS,
   PRESET_AXES,
   allParameterKeys,
+  applyAxisPreset,
   applyBundle,
   axisOf,
   isAxisPreset,
@@ -311,5 +312,96 @@ describe('applying a bundle is one undo step', () => {
     expect(store.getState().past.length).toBe(1)
     store.getState().undo()
     expect(editStatesEqual(store.getState().edit, DEFAULT_EDIT_STATE)).toBe(true)
+  })
+})
+
+describe('switching between presets on the same axis', () => {
+  /**
+   * The hole a sparse patch leaves, and it is a real one.
+   *
+   * `sanitisePatch` drops any value equal to its default, so a preset cannot
+   * say "explicitly the default" — the key vanishes on the way in. That is
+   * harmless applying onto a fresh state and wrong the moment anyone switches:
+   * if the incoming preset holds no opinion on a parameter the outgoing one
+   * set, a merge leaves the outgoing value in place and it survives into a
+   * camera that never asked for it.
+   *
+   * The plastic lens diffuses; the corrected medium format does not mention
+   * diffusion at all, because not diffusing is the default. Merge the second
+   * over the first and you get a corrected medium format with a plastic lens's
+   * haze.
+   */
+  it('does not leave the previous preset on the axis', () => {
+    const plastic = AXIS_PRESETS.find((p) => p.id === 'camera-plastic-lens')!
+    const medium = AXIS_PRESETS.find((p) => p.id === 'camera-medium-format')!
+
+    // The setup that makes this a real question rather than a hypothetical.
+    expect(plastic.patch.diffusionStrength, 'the plastic lens should diffuse').toBeGreaterThan(0)
+    expect(
+      'diffusionStrength' in medium.patch,
+      'medium format should hold no opinion on diffusion',
+    ).toBe(false)
+
+    const after = applyAxisPreset(applyAxisPreset(DEFAULT_EDIT_STATE, plastic), medium)
+
+    expect(after.diffusionStrength, 'the plastic lens diffusion survived the switch').toBe(
+      DEFAULT_EDIT_STATE.diffusionStrength,
+    )
+    // And the incoming preset's own values are of course present.
+    expect(after.distortion).toBe(medium.patch.distortion)
+    expect(after.vignette).toBe(medium.patch.vignette)
+  })
+
+  it('leaves the other two axes alone, which is the point of the split', () => {
+    // Resetting an axis must not reset the others, or switching a camera would
+    // throw away the stock and grade and composition would be pointless.
+    const stock = AXIS_PRESETS.find((p) => p.axis === 'stock')!
+    const grade = AXIS_PRESETS.find((p) => p.axis === 'grade')!
+    const plastic = AXIS_PRESETS.find((p) => p.id === 'camera-plastic-lens')!
+    const medium = AXIS_PRESETS.find((p) => p.id === 'camera-medium-format')!
+
+    let state = applyAxisPreset(DEFAULT_EDIT_STATE, stock)
+    state = applyAxisPreset(state, grade)
+    state = applyAxisPreset(state, plastic)
+    const after = applyAxisPreset(state, medium)
+
+    for (const key of Object.keys(stock.patch)) {
+      expect((after as unknown as Record<string, unknown>)[key], `stock lost ${key}`).toEqual(
+        (applyAxisPreset(DEFAULT_EDIT_STATE, stock) as unknown as Record<string, unknown>)[key],
+      )
+    }
+    for (const key of Object.keys(grade.patch)) {
+      expect((after as unknown as Record<string, unknown>)[key], `grade lost ${key}`).toEqual(
+        (applyAxisPreset(DEFAULT_EDIT_STATE, grade) as unknown as Record<string, unknown>)[key],
+      )
+    }
+  })
+
+  it('leaves the photograph alone: exposure and white balance survive any switch', () => {
+    // The argument `presets.ts` makes for sparse patches. Resetting an axis must
+    // not reach parameters that are on no axis.
+    const plastic = AXIS_PRESETS.find((p) => p.id === 'camera-plastic-lens')!
+    const medium = AXIS_PRESETS.find((p) => p.id === 'camera-medium-format')!
+    const shot = mergeEditState(DEFAULT_EDIT_STATE, {
+      exposure: 0.7,
+      temperature: 5200,
+      tint: 4,
+    })
+    const after = applyAxisPreset(applyAxisPreset(shot, plastic), medium)
+    expect(after.exposure).toBe(0.7)
+    expect(after.temperature).toBe(5200)
+    expect(after.tint).toBe(4)
+  })
+
+  it('does the same for a bundle, on every axis the bundle addresses', () => {
+    const toy = BUNDLES.find((b) => b.id === 'bundle-expired-toy')!
+    const reportage = BUNDLES.find((b) => b.id === 'bundle-reportage')!
+    const first = applyBundle(DEFAULT_EDIT_STATE, toy, AXIS_PRESETS).next
+    const second = applyBundle(first, reportage, AXIS_PRESETS).next
+    const fresh = applyBundle(DEFAULT_EDIT_STATE, reportage, AXIS_PRESETS).next
+    expect(
+      editStatesEqual(second, fresh),
+      'a bundle applied over another did not produce the same picture as applied fresh',
+    ).toBe(true)
   })
 })

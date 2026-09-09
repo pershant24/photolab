@@ -9,19 +9,23 @@ in raw WebGL2: no backend, no account, no upload.
 
 ## What it looks like
 
-One photograph through the three film stocks that ship. Each stock is three
-independent characteristic curves — one per channel, with its own toe, shoulder
-and gamma — and each look here sets the rest of the chain differently around it:
-warm portrait is the stock with halation and grain and no grade at all, punchy
-reversal adds contrast and a lift/gain split, muted documentary drops halation
-entirely and works through split toning and desaturation.
+One photograph through the three film stocks that ship, and nothing else — no
+camera, no grade. Each stock is three independent characteristic curves, one per
+channel with its own toe, shoulder and gamma, plus the two things that belong to
+an emulsion rather than to a lens: how much it halates, and how much grain it
+carries.
 
 | | |
 |---|---|
-| **Original** | **Warm portrait** |
+| **Original** | **Warm portrait negative** |
 | ![](docs/images/original.jpg) | ![](docs/images/warm-portrait.jpg) |
 | **Punchy reversal** | **Muted documentary** |
 | ![](docs/images/punchy-reversal.jpg) | ![](docs/images/muted-documentary.jpg) |
+
+These are rendered from the shipping preset definitions by
+`tests/render/readme-images.spec.ts`, which also fails if they drift out of date
+— the first version of them was hand-made and went stale the moment the presets
+were retuned.
 
 What separates them is **colour crossover** — shadows drifting one way and
 highlights the other, with the drift changing across the exposure range.
@@ -78,6 +82,13 @@ showed as a three-code-value seam; a grain metric measured in the wrong space,
 which would have reported the modulation running the opposite way.
 [`tests/README.md`](tests/README.md) is a log of what was watched to fail and
 what each failure changed.
+
+**Presets compose on three axes.** Camera, stock and grade are disjoint sets of
+parameters — asserted, so a collision is a test failure rather than one preset
+silently clobbering part of another — which makes the number of available looks
+the product rather than the sum. A bundle is an ordered list of references to
+them, so fixing a stock fixes every bundle built on it, and applying one is a
+single undo step.
 
 **No dependency does the hard part.** Raw WebGL2 — no three.js, regl or glfx.
 Colour maths is written in TypeScript first, unit tested against known values,

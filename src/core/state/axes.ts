@@ -213,12 +213,73 @@ export function resolveBundle(bundle: Bundle, available: readonly Preset[]): Res
       continue
     }
     applied.push(found)
-    patch = { ...patch, ...found.patch }
+    // The axis is replaced, not merged onto. Same reason as `applyAxisPreset`:
+    // a component cannot express "explicitly the default", so without the reset
+    // whatever was on that axis before leaks through the gaps. Only the axes the
+    // bundle actually addresses are reset — a bundle naming no grade leaves the
+    // grade alone rather than wiping it.
+    patch = { ...patch, ...axisResetPatch(found.axis), ...found.patch }
   }
   // Last, and the only layer permitted to cross axes.
   if (bundle.override) patch = { ...patch, ...bundle.override }
 
   return { patch, missing, applied }
+}
+
+/**
+ * Every parameter on an axis, set back to its default.
+ *
+ * The other half of applying a preset, and it is not optional.
+ */
+export function axisResetPatch(axis: PresetAxis): Partial<EditState> {
+  const defaults = DEFAULT_EDIT_STATE as unknown as Record<string, number | readonly number[]>
+  const patch: Record<string, number | number[]> = {}
+  for (const key of AXIS_PARAMETERS[axis]) {
+    const value = defaults[key]
+    if (value === undefined) continue
+    // Copied, not aliased. `mergeEditState` snapshots on the way through, but a
+    // shared array reference escaping the defaults object is the kind of thing
+    // that works until something mutates in place.
+    patch[key] = Array.isArray(value) ? [...(value as readonly number[])] : (value as number)
+  }
+  return patch
+}
+
+/**
+ * Apply a preset by **replacing** its axis, not by merging onto it.
+ *
+ * # The bug this fixes, which a sparse patch makes unavoidable
+ *
+ * `sanitisePatch` drops any value equal to its default, because a preset stores
+ * differences. A consequence nobody intended: a preset *cannot say* "explicitly
+ * the default". The key is removed on the way in.
+ *
+ * That is harmless applying onto a fresh state and wrong the moment anyone
+ * switches. The plastic lens diffuses. The corrected medium format holds no
+ * opinion on diffusion, because not diffusing is the default and the key was
+ * dropped. Merged, the second inherits the first's haze — a corrected lens with
+ * a plastic lens's fog, and nothing anywhere says so. Measured before this
+ * existed: `diffusionStrength` stayed at 0.15 where it should have been 0.
+ *
+ * # Why resetting the axis rather than declaring defaults explicitly
+ *
+ * The alternative was to let a preset write its defaults down. It does not
+ * survive contact with the storage format: `sanitisePatch` runs on import, so a
+ * preset round-tripped through a file would lose those keys again and the bug
+ * would return for exactly the presets a user shared with someone else. It also
+ * has to be remembered by every author of every future preset, where this
+ * cannot be forgotten.
+ *
+ * # What is deliberately not reset
+ *
+ * The other two axes, so switching a camera keeps the stock and the grade —
+ * without which composition would be pointless. And every parameter on no axis
+ * at all: exposure, temperature, tint. Those describe the photograph rather than
+ * the look, and `presets.ts` already argues at length that a preset must not
+ * touch them. Resetting an axis must not reach them either.
+ */
+export function applyAxisPreset(state: EditState, preset: AxisPreset): EditState {
+  return mergeEditState(state, { ...axisResetPatch(preset.axis), ...preset.patch })
 }
 
 /** The state a bundle produces from a starting state. One merge, one entry. */
