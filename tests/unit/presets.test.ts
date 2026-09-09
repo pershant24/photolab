@@ -11,7 +11,8 @@ import {
   sanitisePatch,
   serialisePresets,
 } from '../../src/core/state/presets'
-import { BUILT_IN_PRESETS } from '../../src/core/presets/library'
+import { AXIS_PRESETS } from '../../src/core/presets/axisLibrary'
+import { borrowedTrademark } from '../support/trademarks'
 import {
   DEFAULT_EDIT_STATE,
   PARAMETERS,
@@ -146,8 +147,14 @@ describe('the JSON envelope', () => {
 })
 
 describe('the presets that ship', () => {
+  it('borrow no trademark, by whole word', () => {
+    for (const preset of AXIS_PRESETS) {
+      expect(borrowedTrademark(preset.name), `${preset.name}`).toBeNull()
+    }
+  })
+
   it('are all applicable and all change something', () => {
-    for (const preset of BUILT_IN_PRESETS) {
+    for (const preset of AXIS_PRESETS) {
       expect(isEmptyPatch(preset.patch), `${preset.name} does nothing`).toBe(false)
       const applied = applyPreset(DEFAULT_EDIT_STATE, preset)
       expect(editStatesEqual(applied, DEFAULT_EDIT_STATE), `${preset.name}`).toBe(false)
@@ -156,7 +163,7 @@ describe('the presets that ship', () => {
 
   it('leave exposure and white balance to the photograph', () => {
     // A look is not a decision about how much light there was.
-    for (const preset of BUILT_IN_PRESETS) {
+    for (const preset of AXIS_PRESETS) {
       for (const key of ['exposure', 'temperature', 'tint'] as const) {
         expect(key in preset.patch, `${preset.name} sets ${key}`).toBe(false)
       }
@@ -166,7 +173,7 @@ describe('the presets that ship', () => {
   it('contain only values this build accepts, unchanged', () => {
     // A shipped preset that needed clamping would be a shipped preset with a
     // typo in it.
-    for (const preset of BUILT_IN_PRESETS) {
+    for (const preset of AXIS_PRESETS) {
       const { patch, dropped } = sanitisePatch(preset.patch)
       expect(dropped, `${preset.name}`).toEqual([])
       expect(Object.keys(patch).sort(), `${preset.name}`).toEqual(
@@ -175,20 +182,19 @@ describe('the presets that ship', () => {
     }
   })
 
-  it('borrow no trademark, by whole word', () => {
-    // Word boundaries, not substrings: an earlier version of this check flagged
-    // "warm portrait" for containing "portra".
-    const RESERVED = ['portra', 'velvia', 'provia', 'ektar', 'tri-x', 'kodak', 'fuji', 'ilford', 'cinestill']
-    for (const preset of BUILT_IN_PRESETS) {
-      for (const word of preset.name.toLowerCase().split(/[^a-z-]+/)) {
-        expect(RESERVED, `${preset.name} borrows "${word}"`).not.toContain(word)
-      }
-    }
-  })
+  // The trademark check used to be duplicated here and in `axes.test.ts`. Both
+  // were written independently, and both were first written as substring
+  // matches, and both flagged the word "portrait" for containing a mark. Two
+  // copies of a rule means two chances to get it wrong and two places to fix it,
+  // so there is now one, in `tests/support/trademarks.ts`, used by both.
 
   it('has a stable id for every one, so a saved choice survives an update', () => {
-    const ids = BUILT_IN_PRESETS.map((p) => p.id)
+    const ids = AXIS_PRESETS.map((p) => p.id)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id.startsWith('builtin-')).toBe(true)
+    // Prefixed by axis now rather than by "builtin-", which is what a saved
+    // choice is keyed on and what a bundle references.
+    for (const preset of AXIS_PRESETS) {
+      expect(preset.id.startsWith(`${preset.axis}-`), `${preset.id}`).toBe(true)
+    }
   })
 })

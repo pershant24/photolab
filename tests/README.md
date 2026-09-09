@@ -2096,3 +2096,159 @@ crossing, with exposure raising the achromatic value at that crossing to 3.1.
 that boundary, and the only way to know is to break the code and watch.** That
 is the general form of what "watch it fail" is for, and it is why the reintroduce
 step is worth doing rather than assuming the new test would have caught it.
+
+## Tuning the preset library against a photograph
+
+The library was built from what each parameter does, then tuned by rendering it
+onto a photograph and looking. This records what changed and why, because the
+decisions are the interesting part and none of them were visible from the
+numbers alone.
+
+### The frame, and what it cannot judge
+
+One photograph — the one committed under `docs/images/`. A hillside of dense
+greens, saturated primaries in the boats and buildings, bright sand, water and
+sky, so it carries wide hue and tonal range. The four-frame set the gamut census
+first used was lost to a scratch-directory wipe.
+
+What it **cannot** judge, stated plainly rather than left for someone to
+discover: there is no skin in it at any useful size, and no low-key or night
+scene. So the portrait-facing claims — that the warm negative flatters skin,
+that the soft lens is a portrait lens — are placed from what the parameters do
+and are **not** verified. Anything about shadow behaviour in a dark frame is in
+the same position.
+
+### The metric, and why the mean was the wrong one
+
+Presets were compared by mean CIELAB ΔE at first, and it gave an answer that
+disagreed with looking at them: the three stocks measured 2.4 to 3.8 apart and
+were obviously distinguishable on screen.
+
+The mean is diluted by content. Two thirds of this frame is a green hillside
+that most of these looks barely touch, so a preset that transforms the sky and
+the boats and leaves the trees alone scores low on a mean over every pixel. That
+is the occupancy problem again, in a third place: the statistic averaged over a
+population dominated by one kind of content.
+
+**p90 is the statistic**, and it says what the eye says: how far apart are the
+parts that actually changed. A pair below about 8 at p90 is hard to tell apart.
+The median is reported alongside because a large p90 with a tiny median means a
+look that acts on very little of the frame, which is worth knowing.
+
+### What looking at it changed
+
+| preset | before | after | why |
+|---|---|---|---|
+| Cross process | p90 **44** | 24 | Not a look, a fault. The sky blew to cream and the greens went electric — every other grade sat under 12. Contrast 1.5 → 1.28, saturation and tints roughly halved. |
+| Warm scan vs Teal shadows | **5.6 apart** | 9.9 | Two names for one look. Both pushed gain in the same direction. A warm scan is tone and an overall cast, not a complementary split, so its lift/gain came out entirely and the teal grade's went further. |
+| Medium format | p90 **9.3** from the original, 12 from its nearest neighbour | 15.7 / 21.2 | Barely a preset. Fixed by direction rather than amount: it now pincushions where every other camera barrels, which reads as a different lens instead of less of the same one. |
+| Punchy reversal vs Warm portrait | **5.1 apart** | 8.7 | The characteristic curves alone are gentle — deliberately, from Stage 6 — and a midtone-dominated frame barely shows crossover. Separated on halation instead, which is a property of the film base rather than of the curves, so it is the stock axis's to use. |
+| Plastic lens | — | — | Diffusion 0.22 → 0.15 and distortion −0.22 → −0.16. It read as smeared rather than as a cheap lens. |
+| Expired film, plastic lens | — | — | Three components that each soften — a diffusing lens, a flat stock, a lifted grade — compounded until the hillside disappeared. Trimmed in the bundle's override, which is precisely the case that layer exists for. |
+
+Nothing was cut. The two pairs that measured too close were separated instead,
+and in both cases the separation was a better preset rather than a bigger
+number: the warm scan is now actually about scan character, and the medium
+format is now actually a different lens.
+
+### Two presets that said nothing, caught by a test
+
+`sanitisePatch` drops any value equal to its default, because a sparse preset
+stores differences. So a preset that sets a parameter to the default sets
+nothing at all, silently.
+
+Two shipped presets did. The soft portrait lens declared `grainSize: 0.0009`,
+which is the default, so it made no format claim whatever — and format is half
+of why the camera axis owns grain size. All three stocks declared
+`filmStrength: 1`, also the default.
+
+Both were caught by an assertion that predates this work: *a shipped preset
+contains only values this build accepts, unchanged*. It compares the keys
+surviving `sanitisePatch` against the keys written down, and a dropped no-op
+shows as a length mismatch. It was written to catch typos and it caught a
+category of mistake nobody had in mind — a preset that looks complete in the
+source and is not.
+
+### A rule written twice, wrong the same way both times
+
+The trademark check existed in `presets.test.ts` already. Writing a second one
+for the axis library, from scratch, reproduced its original bug exactly: a
+substring match that rejects the ordinary word **portrait**, because *Portra* is
+inside it. The existing check even carried a comment recording the same fix.
+
+Two copies of a rule are two chances to get it wrong and two places to fix it,
+and the second copy did not inherit the first one's scar. There is now one list,
+in `tests/support/trademarks.ts`, used by both.
+
+### The census grades are pinned, and had to be
+
+The Part E census quotes figures per grade, and those grades were the shipping
+library. Retuning the library would have silently invalidated a published table
+with no test noticing, and the table would have gone on looking authoritative.
+
+They are now literals in `tests/support/gamutChain.ts`, with the reasoning
+beside them. It is the same argument `two-resolution.spec.ts` already makes for
+pinning its own edit rather than inheriting a default: **a measurement that
+reads its inputs from something people tune stops being reproducible the first
+time someone tunes it.** Verified by re-running the census after pinning and
+confirming every published figure is unchanged.
+
+## Assert occupancy rather than assuming it, and assert it as a count
+
+This project has now made the same mistake four times in four different places.
+The abstract statement of it has been in this file since Stage 7 and has not
+prevented the next instance, so here it is with all four named.
+
+| where | the assumption | what it cost |
+|---|---|---|
+| A parameter domain | the tone curve's x axis runs to ACEScct 1.0 | most of the domain held no pixels, so most of the control did nothing |
+| A test's input space | a hue bound measured over the narrow region white balance reaches, then stated generally | HSL can push any hue, and the bound did not survive contact with it |
+| A golden fixture | the synthetic gradients cover the pipeline | none of them held a colour near the gamut gate, and a 63 code value cliff shipped |
+| A comparison metric | mean ΔE says how different two looks are | two thirds of the frame is hillside the looks barely touch, so the mean said 2.4 where the eye said obviously different |
+
+The shape is identical every time: **a population was assumed to cover the thing
+being measured, and it did not.** Parameters, inputs, fixtures, and now the
+denominator of a statistic.
+
+**The rule: assert occupancy as a count, not as a belief.** The count differs by
+case and that is the whole point — it forces you to say what "covered" means
+here:
+
+- a **boundary fixture**: how many times does the ramp actually cross the
+  boundary? The second gamut fixture crossed it *zero* times, and printing that
+  number is what found it. Nothing about the fixture looked wrong.
+- a **parameter domain**: how many pixels of a real photograph land in each part
+  of it?
+- a **bound over a space**: does the sample reach the corners a later stage can
+  reach, or only the ones the fitting stage could?
+- a **metric**: what fraction of the population is actually affected? If it is
+  small, a mean over everything is measuring the unaffected part.
+
+### And a fixture is not automatically sensitive to the defect it was built for
+
+The other half of the same episode, and the more uncomfortable one. Three
+fixtures were written for the gamut boundary:
+
+1. A full-saturation hue sweep. Measured **7 with the correct operator and 3
+   with the broken one** — not merely insensitive, *pointing the wrong way*. A
+   green suite would have been reported as evidence the operator was fine.
+2. A ramp from an already-saturated colour. Never crossed the boundary at all.
+3. Neutral to a primary, at raised exposure. 18 correct, 107 broken.
+
+Only breaking the code distinguished them. "This fixture covers that boundary"
+is a claim about a fixture, and the only evidence for it is watching the fixture
+fail when the boundary is broken.
+
+## A duplicated guard does not inherit the original's fixes
+
+The trademark check existed in `presets.test.ts`, word-bounded, carrying a
+comment explaining that an earlier substring version had rejected the ordinary
+word *portrait* because a mark is inside it.
+
+A second one was written from scratch for the axis library and reproduced that
+bug exactly — same substring match, same word, same rejection. The scar was
+right there in the first copy and the second copy could not benefit from it.
+
+**Two copies of a rule are two chances to get it wrong and two places to fix
+it.** There is now one list, in `tests/support/trademarks.ts`, used by both. The
+consolidation is the small part; the reason is worth keeping.

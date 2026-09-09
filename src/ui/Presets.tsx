@@ -12,7 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 
-import { BUILT_IN_PRESETS } from '../core/presets/library'
+import { AXIS_PRESETS, BUNDLES } from '../core/presets/axisLibrary'
+import { PRESET_AXES, axisResetPatch, resolveBundle } from '../core/state/axes'
 import { editorStore } from '../core/state/editorStore'
 import {
   PresetFormatError,
@@ -23,6 +24,7 @@ import {
   serialisePresets,
 } from '../core/state/presets'
 import type { Preset } from '../core/state/presets'
+import type { EditState } from '../core/state/editState'
 import { deletePreset, loadPresets, savePreset } from '../core/state/presetStore'
 
 export function Presets() {
@@ -34,6 +36,11 @@ export function Presets() {
 
   useEffect(() => {
     void loadPresets().then(setSaved)
+  }, [])
+
+  /** One history entry, whatever the patch touches. Shared by presets and bundles. */
+  const applyPatch = useCallback((patch: Partial<EditState>) => {
+    editorStore.getState().applyPatch(patch)
   }, [])
 
   const apply = useCallback((preset: Preset) => {
@@ -86,12 +93,12 @@ export function Presets() {
     }
   }, [])
 
-  const row = (preset: Preset, deletable: boolean) => (
+  const row = (preset: Preset, deletable: boolean, patch?: Partial<EditState>) => (
     <li key={preset.id} className="flex items-center gap-2 py-0.5">
       <button
         type="button"
         data-testid={`apply-${preset.id}`}
-        onClick={() => apply(preset)}
+        onClick={() => (patch ? applyPatch(patch) : apply(preset))}
         className="min-w-0 flex-1 truncate text-left text-ink hover:underline"
       >
         {preset.name}
@@ -114,7 +121,54 @@ export function Presets() {
   return (
     <div className="border-b border-hairline px-4 py-3 text-xs" data-testid="presets">
       <div className="mb-1.5 text-ink">Presets</div>
-      <ul className="mb-2">{BUILT_IN_PRESETS.map((preset) => row(preset, false))}</ul>
+
+      {/*
+        Bundles first, then the axes. A bundle is what most people want — a
+        finished starting point — and the axes are there for anyone who wants to
+        swap one third of it. Grouping by axis is not decoration: it is what makes
+        the composition legible, because a user who can see three lists
+        understands they can take one from each.
+      */}
+      <ul className="mb-2" data-testid="bundle-list">
+        {BUNDLES.map((bundle) => {
+          const { patch, missing } = resolveBundle(bundle, AXIS_PRESETS)
+          return (
+            <li key={bundle.id} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid={`apply-${bundle.id}`}
+                onClick={() => applyPatch(patch)}
+                className="grow truncate text-left text-ink-dim hover:text-ink"
+              >
+                {bundle.name}
+                {missing.length > 0 && (
+                  // Said out loud rather than repaired. The component may come
+                  // back, and a bundle quietly applying two thirds of itself
+                  // without saying so is worse than one that admits it.
+                  <span className="ml-1 text-ink-dim" title={`missing: ${missing.join(', ')}`}>
+                    (partial)
+                  </span>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      {PRESET_AXES.map((axis) => (
+        <div key={axis} className="mb-2 border-t border-hairline pt-1.5">
+          <div className="mb-1 text-ink-dim capitalize">{axis}</div>
+          <ul data-testid={`${axis}-list`}>
+            {AXIS_PRESETS.filter((preset) => preset.axis === axis).map((preset) =>
+              // The axis is replaced rather than merged onto, so switching from
+              // one camera to another cannot leave the first one's diffusion
+              // behind. `applyAxisPreset` carries the reasoning; the same patch
+              // is built here so it stays one history entry.
+              row(preset, false, { ...axisResetPatch(axis), ...preset.patch }),
+            )}
+          </ul>
+        </div>
+      ))}
       {saved.length > 0 && (
         <ul className="mb-2 border-t border-hairline pt-1.5">
           {saved.map((preset) => row(preset, true))}

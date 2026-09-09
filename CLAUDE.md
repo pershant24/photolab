@@ -285,6 +285,37 @@ If it is not, use a window and keep the shape.
 
 ---
 
+## 3b. Deferred: frame borders
+
+Not cancelled, and recorded with the condition to revisit rather than as an
+intention, because "we might do borders" is not a decision anyone can act on.
+
+A border is unexposed rebate or the paper edge of a scan. It is **not light**,
+so it cannot run through the tone map — a paper-white border would be rolled off
+as though it were a highlight. That puts it after the display stage, in a
+**presentation stage that does not exist**.
+
+Three things it needs, and the third is why it is deferred:
+
+1. A new stage after display, added structurally with its position asserted.
+2. A texture input not derived from the source — a new asset class. *The date
+   stamp needs this too, so deferring borders does not defer it.*
+3. **Export over a region with no source pixel.** If the border extends the
+   frame, output dimensions exceed source dimensions, and export tiles are
+   defined over the source rect. That is a real change to the tiling model, and
+   the Stage 10 parity test and the two-resolution invariant both have to keep
+   holding across it.
+
+Revisit when the finished-object look is wanted for its own sake — a bordered
+scan to hand someone — rather than as a effect among effects. Until then the
+cost is concentrated in (3), which buys nothing else.
+
+The alternative that avoids (3) entirely is a border drawn *inside* the frame,
+cropping the photograph. No dimension change and no export problem, and less
+faithful. If borders are ever wanted cheaply, that is the version to build.
+
+---
+
 ## 4. Resolution independence
 
 **Every effect parameter expressed in spatial units must be normalised against

@@ -45,7 +45,6 @@ import { splitControlPoints } from '../../src/core/state/editState'
 import type { EditState } from '../../src/core/state/editState'
 import { findFilmStock } from '../../src/core/colour/filmStock'
 import { filmStockPatch } from '../../src/core/state/editState'
-import { BUILT_IN_PRESETS } from '../../src/core/presets/library'
 
 /** ingest: one 8-bit sRGB triple to linear ACEScg. */
 export function ingest(r8: number, g8: number, b8: number): Vec3 {
@@ -166,10 +165,34 @@ function stock(id: string): Partial<EditState> {
   return filmStockPatch(found)
 }
 
+/**
+ * The census grades, pinned as literals rather than read from the shipping
+ * library.
+ *
+ * This is deliberate and it is the same argument `two-resolution.spec.ts`
+ * already makes for pinning its edit rather than inheriting a default: a
+ * measurement that reads its inputs from something people tune will silently
+ * stop matching the numbers published beside it. The Part E census in
+ * `tests/README.md` quotes figures per grade. If those grades were live
+ * references, the next person to improve a preset would invalidate a published
+ * table without any test noticing — and the table would go on looking
+ * authoritative.
+ *
+ * These four were the shipping library when the census was run. They no longer
+ * are; the library is now split across three axes and retuned. Keeping the
+ * originals here is what makes the published before-and-after reproducible.
+ */
+const CENSUS_PINNED: Record<string, Partial<EditState>> = {
+  'builtin-soft-portrait': {"filmCurveRed":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.178,0.2708943385655016,0.264,0.34224137052897197,0.339,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.492,0.5547945205479452,0.57,1,1],"filmCurveGreen":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.18527,0.2708943385655016,0.27089,0.34224137052897197,0.34224,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.48494,0.5547945205479452,0.5548,1,0.98],"filmCurveBlue":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.193,0.2708943385655016,0.278,0.34224137052897197,0.3455,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.478,0.5547945205479452,0.54,1,0.96],"filmStrength":0.7,"contrast":0.94,"lift":[-0.006,0.001,0.008],"gain":[0.008,0.002,-0.006],"hslSaturation":[-0.06,-0.04,0,0,0,0],"hslLuminance":[0.04,0.04,0,0,0,0],"halationStrength":0.35,"halationThreshold":2.05,"halationRadius":0.005,"grainStrength":0.35},
+  'builtin-teal-and-orange': {"filmCurveRed":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.168,0.2708943385655016,0.252,0.34224137052897197,0.332,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.505,0.5547945205479452,0.6,1,1],"filmCurveGreen":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.178,0.2708943385655016,0.261,0.34224137052897197,0.337,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.497,0.5547945205479452,0.582,1,0.99],"filmCurveBlue":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.195,0.2708943385655016,0.276,0.34224137052897197,0.343,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.488,0.5547945205479452,0.562,1,0.96],"filmStrength":0.8,"contrast":1.18,"lift":[-0.012,0.002,0.016],"gain":[0.018,0.004,-0.014],"hslSaturation":[0.08,0.12,0,0,-0.12,0],"halationStrength":0.5,"grainStrength":0.3,"grainSize":0.0008},
+  'builtin-faded-document': {"filmCurveRed":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.192,0.2708943385655016,0.274,0.34224137052897197,0.343,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.478,0.5547945205479452,0.538,1,0.92],"filmCurveGreen":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.206,0.2708943385655016,0.283,0.34224137052897197,0.348,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.47,0.5547945205479452,0.522,1,0.88],"filmCurveBlue":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.194,0.2708943385655016,0.275,0.34224137052897197,0.3435,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.477,0.5547945205479452,0.536,1,0.91],"contrast":0.86,"lift":[0.012,0.016,0.01],"splitShadowTint":[-0.004,0.006,-0.002],"splitHighlightTint":[0.008,0.006,0.001],"splitBalance":-0.5,"hslSaturation":[-0.2,-0.2,-0.25,-0.2,-0.2,-0.2],"grainStrength":0.6,"grainSize":0.0012},
+  'builtin-night-push': {"filmCurveRed":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.168,0.2708943385655016,0.252,0.34224137052897197,0.332,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.505,0.5547945205479452,0.6,1,1],"filmCurveGreen":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.178,0.2708943385655016,0.261,0.34224137052897197,0.337,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.497,0.5547945205479452,0.582,1,0.99],"filmCurveBlue":[0.0729055341958355,0.0729055341958355,0.18527790020933724,0.195,0.2708943385655016,0.276,0.34224137052897197,0.343,0.4135884024924423,0.4135884024924423,0.4849354344559126,0.488,0.5547945205479452,0.562,1,0.96],"filmStrength":0.6,"contrast":1.3,"lift":[-0.004,0,0.007],"gamma":[0.004,0,-0.003],"splitShadowTint":[-0.006,-0.001,0.01],"splitBalance":-1.5,"halationStrength":0.7,"halationThreshold":1.95,"halationRadius":0.008,"grainStrength":0.75,"grainSize":0.0013},
+}
+
 function preset(id: string): Partial<EditState> {
-  const found = BUILT_IN_PRESETS.find((p) => p.id === id)
-  if (!found) throw new RangeError(`no preset "${id}"`)
-  return found.patch
+  const found = CENSUS_PINNED[id]
+  if (!found) throw new RangeError(`no pinned census grade "${id}"`)
+  return found
 }
 
 function addSaturation(patch: Partial<EditState>, delta: number): Partial<EditState> {

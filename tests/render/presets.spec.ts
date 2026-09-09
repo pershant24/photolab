@@ -89,34 +89,56 @@ test.describe('presets', () => {
   })
 
   test('the shipped presets are all listed and all apply', async ({ page }) => {
+    // Every applicable thing in the panel: the four bundles and every preset on
+    // each of the three axes. The selector is deliberately one pattern rather
+    // than one per group, so a group that stops rendering is a failure here
+    // instead of a silently shorter list.
     const ids = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-testid^="apply-builtin-"]')].map(
+      [...document.querySelectorAll('[data-testid^="apply-"]')].map(
         (node) => node.getAttribute('data-testid') ?? '',
       ),
     )
-    expect(ids.length).toBeGreaterThanOrEqual(4)
+    // Four bundles, four cameras, three stocks, six grades.
+    expect(ids.length, `found: ${ids.join(', ')}`).toBeGreaterThanOrEqual(17)
+    for (const axis of ['camera', 'stock', 'grade']) {
+      await expect(page.locator(`[data-testid="${axis}-list"] li`).first()).toBeVisible()
+    }
 
     for (const id of ids) {
       // The depth BEFORE, not the absolute depth: `reset()` is itself a commit,
       // so the history grows across the loop and an absolute count would pass on
       // the first preset and fail on every one after it.
-      const before = await page.evaluate(() => {
+      const { before, baseline } = await page.evaluate(() => {
         const store = (window as unknown as {
-          __photolabStore: { getState(): { reset(): void; past: readonly unknown[] } }
+          __photolabStore: {
+            getState(): { reset(): void; past: readonly unknown[]; edit: Record<string, unknown> }
+          }
         }).__photolabStore
         store.getState().reset()
-        return store.getState().past.length
+        return {
+          before: store.getState().past.length,
+          baseline: JSON.stringify(store.getState().edit),
+        }
       })
       await page.click(`[data-testid="${id}"]`)
       const changed = await page.evaluate(() => {
         const store = (window as unknown as {
           __photolabStore: { getState(): { edit: Record<string, unknown>; past: readonly unknown[] } }
         }).__photolabStore
-        return { entries: store.getState().past.length, contrast: store.getState().edit.contrast }
+        return {
+          entries: store.getState().past.length,
+          // The whole state, not one parameter. This used to read `contrast`,
+          // which every compound preset happened to set. On three axes that is
+          // no longer true and must not be: contrast belongs to the grade, and a
+          // camera preset touching it would break the disjointness the axes
+          // exist for. So the check is that the state moved, which is what the
+          // assertion always meant.
+          edit: JSON.stringify(store.getState().edit),
+        }
       })
       // One entry, and it did something.
       expect(changed.entries - before, `${id} history`).toBe(1)
-      expect(changed.contrast, `${id} contrast`).not.toBe(1)
+      expect(changed.edit, `${id} changed nothing`).not.toBe(baseline)
     }
   })
 
