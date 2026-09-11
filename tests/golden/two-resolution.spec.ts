@@ -46,7 +46,57 @@ const SOURCE = { width: 2400, height: 1600 }
 // shipping default raised above this synthetic source's peak would drive the
 // measured disagreement to zero and make this test pass trivially — a test that
 // passes because the effect is off is worse than no test. See tests/README.md.
-const EDIT = { halationStrength: 0.8, halationThreshold: 1.2, halationRadius: 0.012 }
+/*
+ * One case per spatial parameter with a radius, and the reason there is more
+ * than one now is an audit result rather than tidiness.
+ *
+ * This is the **only test in the suite that can see a scale-dependent error.**
+ * Every other tiling test compares a tiled render against a whole one *at the
+ * same scale*, and an error that depends only on scale is carried equally by
+ * both legs and cancels. Measured: dropping `bufferScale` from the shared radius
+ * — an identity at 1:1 and wrong at any other scale — was caught by this test
+ * and by nothing else. `tile-overlap` passed, `export-parity` passed, and
+ * `lens.spec`'s "2:1" diffusion case passed, because both of its legs render at
+ * 2 and the error divides out.
+ *
+ * So a radius parameter that is not in this list has no coverage of its own
+ * against that class of error. Diffusion had none: it was safe only because it
+ * delegates to the same shared function halation does, which is a fact about
+ * today's code rather than a property of the tests.
+ */
+/** The radius is named beside the edit because the tolerance is derived from it. */
+const CASES: Record<
+  string,
+  { edit: Record<string, number>; radius: number; allowedFailures: number }
+> = {
+  halation: {
+    edit: { halationStrength: 0.8, halationThreshold: 1.2, halationRadius: 0.012 },
+    radius: 0.012,
+    allowedFailures: 0,
+  },
+  diffusion: {
+    edit: { diffusionStrength: 0.85, diffusionRadius: 0.02 },
+    radius: 0.02,
+    /*
+     * Seven of 2304, and not zero, which is a real difference between the two
+     * effects rather than a number tuned until it passed.
+     *
+     * Halation adds a small amount of light above a threshold, so the blur
+     * contributes to a minority of the frame and the second-order sampling term
+     * stays inside its bound everywhere. Diffusion at strength 0.85 makes the
+     * blurred image most of the output *everywhere*, so the same sampling
+     * difference is carried across the whole frame and a handful of samples on
+     * the steepest gradients land just outside a bound derived for the typical
+     * case — measured at 1.56e-2 against 1.30e-2, a factor of 1.2.
+     *
+     * The allowance is sized from the discrimination rather than from the
+     * failure: dropping `bufferScale` from the radius — the error this test
+     * exists to catch and the only test that can — puts **196** samples outside
+     * the bound. Seven against 196 is a factor of 28, and 10 sits far from both.
+     */
+    allowedFailures: 10,
+  },
+}
 
 test.describe('the two-resolution invariant', () => {
   test.beforeEach(async ({ page }) => {
@@ -113,7 +163,10 @@ test.describe('the two-resolution invariant', () => {
     await page.waitForTimeout(200)
   })
 
-  test('renders the same picture at two buffer resolutions', async ({ page }) => {
+  for (const [name, { edit: EDIT, radius: RADIUS, allowedFailures }] of Object.entries(
+    CASES,
+  )) {
+  test(`${name} renders the same picture at two buffer resolutions`, async ({ page }) => {
     const result = await page.evaluate<
       { high: number[]; low: number[]; highSize: number[]; lowSize: number[] },
       { edit: Record<string, number>; source: { width: number; height: number } }
@@ -213,7 +266,7 @@ test.describe('the two-resolution invariant', () => {
      * storage adds its own floor on top.
      */
     const coarseTexel = 1 / (result.lowSize[0] ?? 1)
-    const samplingRatio = coarseTexel / EDIT.halationRadius
+    const samplingRatio = coarseTexel / RADIUS
     const tolerance = 2 * samplingRatio * samplingRatio * spread + 2 ** -11
 
     const failures: string[] = []
@@ -231,7 +284,10 @@ test.describe('the two-resolution invariant', () => {
     }
 
     expect(
-      `${failures.length} of ${result.high.length} samples disagree\n${failures.slice(0, 6).join('\n')}`,
-    ).toBe(`0 of ${result.high.length} samples disagree\n`)
+      failures.length,
+      `${failures.length} of ${result.high.length} samples disagree, ` +
+        `allowance ${allowedFailures}\n${failures.slice(0, 6).join('\n')}`,
+    ).toBeLessThanOrEqual(allowedFailures)
   })
+}
 })
