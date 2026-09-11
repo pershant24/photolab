@@ -1,7 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * The lens stage against tiling, at a scale other than 1:1.
+ * The spatial passes against tiling, at a scale other than 1:1.
+ *
+ * Named for the lens stage because that is what it started as. It now also
+ * carries the light leak, which is a film-stage pass with the same kind of
+ * dependency — absolute position in the frame — and no better harness to use.
  *
  * Three of these four passes move pixels or read neighbours, and the fourth reads
  * its own position in the full frame. All four are therefore wrong in a way that
@@ -47,7 +51,17 @@ const SETUP = `async (source) => {
       // Broad smooth structure plus a gentle grid, so displacement is visible
       // without any hard edge to alias.
       const grid = 0.12 * (Math.sin(u * 18.0) * Math.sin(v * 14.0))
-      const base = 0.25 + 0.45 * u + 0.2 * v + grid
+      // A finer component, added when microcontrast joined this stage. The coarse
+      // grid above has a period of about 167 source pixels, and an unsharp mask
+      // at a radius of six has essentially nothing to act on at that scale: the
+      // microcontrast case passed its tile comparison, and passed it just as
+      // happily with the radius mutated to read the buffer instead of the source.
+      // A test that cannot see the effect cannot see an error in it either.
+      //
+      // Still a sinusoid, so still band-limited and still safe to resample. The
+      // period is about 19 source pixels, three times the radius under test.
+      const fine = 0.06 * (Math.sin(u * 160.0) * Math.sin(v * 120.0))
+      const base = 0.25 + 0.45 * u + 0.2 * v + grid + fine
       image.data[i] = Math.max(0, Math.min(255, Math.round(base * 255)))
       image.data[i+1] = Math.max(0, Math.min(255, Math.round((base * 0.85 + 0.08) * 255)))
       image.data[i+2] = Math.max(0, Math.min(255, Math.round((base * 0.7 + 0.15) * 255)))
@@ -64,7 +78,8 @@ const SETUP = `async (source) => {
 }`
 
 const OFF = {
-  distortion: 0, aberration: 0, diffusionStrength: 0, vignette: 0,
+  distortion: 0, aberration: 0, diffusionStrength: 0, vignette: 0, microcontrast: 0,
+  lightLeakStrength: 0,
   halationStrength: 0, grainStrength: 0, filmStrength: 0, exposure: 0, contrast: 1,
 }
 
@@ -75,9 +90,17 @@ const CASES = {
   aberration: { ...OFF, aberration: 0.008 },
   diffusion: { ...OFF, diffusionStrength: 0.7, diffusionRadius: 0.02 },
   vignette: { ...OFF, vignette: 0.8 },
+  microcontrast: { ...OFF, microcontrast: 0.9, microcontrastRadius: 0.012 },
+  // A film-stage pass, tested here because this is where the tiling harness the
+  // audit found adequate lives: an off-centre 2x2 split at a scale other than
+  // one. A leak reads its absolute position in the frame, which is the same
+  // dependency the vignette has and the same one every export tile breaks if it
+  // is read from the buffer instead.
+  lightLeak: { ...OFF, lightLeakStrength: 0.8, lightLeakPosition: 0.12 },
   everything: {
     ...OFF, distortion: -0.12, aberration: 0.005,
     diffusionStrength: 0.5, diffusionRadius: 0.015, vignette: 0.6,
+    microcontrast: 0.6, microcontrastRadius: 0.008,
   },
 } as const
 
@@ -240,6 +263,52 @@ test.describe('the lens stage under tiling', () => {
       ).toBeLessThan(tolerance(result.spread))
     })
   }
+
+  test('the light leak is a pure function of the edit, with no seed of its own', async ({
+    page,
+  }) => {
+    // Cheap insurance rather than a response to a bug. The pass has no time
+    // uniform and no frame counter today, and the way that changes is someone
+    // adding one to make a leak "feel alive" without noticing that it breaks
+    // preview-export agreement and every golden comparison at once. Grain has
+    // the same assertion for the same reason.
+    const twice = await page.evaluate<
+      { a: number[]; b: number[] },
+      { edit: Record<string, number>; source: { width: number; height: number } }
+    >(({ edit, source }) => {
+      const renderer = (window as unknown as { __photolabRenderer: RendererLike })
+        .__photolabRenderer
+      renderer.stop()
+      const gl = renderer.context.gl
+      const once = (): number[] => {
+        const target = renderer.graph.pool.acquire(source.width, source.height)
+        renderer.graph.render(
+          {
+            ...renderer.input,
+            edit: { ...renderer.input.edit, ...edit },
+            view: { ...renderer.input.view, toneMap: false, gamutCompress: false },
+          },
+          {
+            resolution: [source.width, source.height] as const,
+            imageSize: [source.width, source.height] as const,
+            sourceRect: [0, 0, source.width, source.height] as const,
+          },
+          { finalTarget: target },
+        )
+        const raw = new Uint16Array(source.width * source.height * 4)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, (target as { framebuffer: WebGLFramebuffer }).framebuffer)
+        gl.readPixels(0, 0, source.width, source.height, gl.RGBA, gl.HALF_FLOAT, raw)
+        renderer.graph.pool.release(target)
+        const out: number[] = []
+        for (let i = 0; i < raw.length; i += 4 * 997) out.push(raw[i] ?? 0)
+        return out
+      }
+      return { a: once(), b: once() }
+    }, { edit: CASES.lightLeak, source: SOURCE })
+
+    expect(twice.a.length).toBeGreaterThan(50)
+    expect(twice.a, 'the same state rendered twice gave two different leaks').toEqual(twice.b)
+  })
 
   test('declares an overlap large enough, and starving it shows', async ({ page }) => {
     // The overlap is a function of the parameter and the frame diagonal rather

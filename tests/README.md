@@ -2364,3 +2364,56 @@ number move in the direction you expect.** Not "does the test fail" — a test c
 fail for the wrong reason — but does the measurement move the way the physics
 says it should. If it moves the wrong way, the fixture is wrong however sensible
 it looks.
+
+## Microcontrast and light leaks, looked at
+
+### Microcontrast reads as lens character up to a radius, and not past it
+
+The amount is the obvious control and the radius is the one that decides what
+the effect *is*. At full amount on a real photograph, at 1:1:
+
+| radius | what it looks like |
+|---|---|
+| 0.004 (default) | a crisper lens; no visible fringe |
+| 0.006 | clearly crisper, still clean |
+| 0.010 | a bright rim begins where a roofline meets dark trees |
+| 0.014 | a distinct band along that boundary |
+| 0.020 | the whole roof-to-hillside boundary is outlined |
+
+So the maximum is **0.01**, not the 0.02 it was first written with. Past there
+it stops being acutance and becomes local contrast — a real effect, but not the
+one the control is named for, and shipping it under this name would make the
+parameter dishonest.
+
+The amount behaves as expected against a fixed radius: 0.3 is a crisper lens,
+0.6 is clearly crisper and still clean, 1.0 is the most that reads as a lens
+rather than as sharpening. That is why the cap is on the radius rather than on
+the amount — the amount changes how much, the radius changes what.
+
+### The light leak is developed, and it is visible that it is
+
+The claim that injecting before the film stage matters is checkable by turning
+the film stage off and looking at the same leak:
+
+- **with `filmStrength: 0`** the leak is a warm gradient laid over the frame. It
+  reads as something composited.
+- **with a stock** the same leak compresses into the shoulder where it is
+  strongest — the sky under it goes to near-white rather than to orange — and
+  halation blooms it. It reads as light that exposed the emulsion.
+
+That difference is the entire argument for the injection point, and it is worth
+recording that it is legible rather than theoretical.
+
+### What the new parameters did to the camera axis
+
+They separated it further rather than homogenising it, which was the risk. The
+corrected medium format now has the highest acutance at the tightest radius and
+the plastic lens has the least acutance plus a leak — so the two ends of the axis
+now differ on four properties instead of two, and in the same direction each
+time. The soft portrait lens sets no microcontrast at all, which is the honest
+representation of a lens whose character is softness: the control cannot
+subtract acutance, so it adds none.
+
+That last one only works because applying a preset resets its axis first. Before
+that fix, a soft lens applied after a corrected one would have inherited its
+acutance and its radius, and the preset would have quietly been a sharp lens.

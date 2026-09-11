@@ -75,10 +75,19 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     // scatters it, and falls off toward the corners.
     'distortion',
     'aberration',
+    // Acutance before the scatter: sharpening after diffusion would raise the
+    // contrast of the haze, the same mistake as sharpening after grain.
+    'microcontrastBlurH',
+    'microcontrastBlurV',
+    'microcontrastComposite',
     'diffusionBlurH',
     'diffusionBlurV',
     'diffusionComposite',
     'vignette',
+    // The leak did not come through the lens, and it reaches the emulsion before
+    // the emulsion does anything — so halation blooms it and the curves develop
+    // it as exposure.
+    'lightLeak',
     'halationThreshold',
     'halationBlurH',
     'halationBlurV',
