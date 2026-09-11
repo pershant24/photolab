@@ -46,7 +46,99 @@ const SOURCE = { width: 2400, height: 1600 }
 // shipping default raised above this synthetic source's peak would drive the
 // measured disagreement to zero and make this test pass trivially — a test that
 // passes because the effect is off is worse than no test. See tests/README.md.
-const EDIT = { halationStrength: 0.8, halationThreshold: 1.2, halationRadius: 0.012 }
+/*
+ * One case per spatial parameter with a radius, and the reason there is more
+ * than one now is an audit result rather than tidiness.
+ *
+ * This is the **only test in the suite that can see a scale-dependent error.**
+ * Every other tiling test compares a tiled render against a whole one *at the
+ * same scale*, and an error that depends only on scale is carried equally by
+ * both legs and cancels. Measured: dropping `bufferScale` from the shared radius
+ * — an identity at 1:1 and wrong at any other scale — was caught by this test
+ * and by nothing else. `tile-overlap` passed, `export-parity` passed, and
+ * `lens.spec`'s "2:1" diffusion case passed, because both of its legs render at
+ * 2 and the error divides out.
+ *
+ * So a radius parameter that is not in this list has no coverage of its own
+ * against that class of error. Diffusion had none: it was safe only because it
+ * delegates to the same shared function halation does, which is a fact about
+ * today's code rather than a property of the tests.
+ */
+/** The radius is named beside the edit because the tolerance is derived from it. */
+const CASES: Record<
+  string,
+  {
+    edit: Record<string, number>
+    /** The same edit with this effect off, for the non-vacuity count. */
+    off: Record<string, number>
+    /** Fewest samples the effect must move for the comparison to mean anything. */
+    minMoved: number
+    radius: number
+    allowedFailures: number
+  }
+> = {
+  /*
+   * Microcontrast is deliberately absent, and this is not an oversight.
+   *
+   * It was added here, it passed, and the non-vacuity count below showed it was
+   * moving **zero** of 2304 samples. The fixture's finest structure is a
+   * Gaussian of sigma 144 source pixels; an unsharp mask has nothing to act on
+   * at that scale, and no radius inside the parameter's range changes that.
+   *
+   * It appeared to catch a mutated radius, which is the part worth recording:
+   * dropping the buffer scale makes the radius enormous on the coarse buffer, so
+   * the two resolutions disagree loudly. That is the test noticing that a broken
+   * operator *explodes*, not that a correct one matches — it would have reported
+   * green for any correctly-scaled radius and for a great many incorrect ones.
+   *
+   * Giving the fixture structure at that scale is not available either: at the
+   * quarter-resolution leg a nineteen-pixel period lands near Nyquist, and the
+   * comparison would measure aliasing. `grain-resolution.spec.ts` records the
+   * same wall from the other side.
+   *
+   * So microcontrast's coverage against a scale error is **transitive**: it
+   * calls the same `blurRadiusInBufferPixels` these two cases exercise. The
+   * audit above criticised exactly that arrangement for being an accident of
+   * today's code, so it is now asserted rather than assumed —
+   * `tests/unit/blur-sharing.test.ts`.
+   */
+  halation: {
+    off: { halationStrength: 0 },
+    // Halation only acts above its threshold, so it reaches a small part of the
+    // frame by design. Measured at 29 of 2304; a global effect would be wrong
+    // here and a localised one at single digits would mean the threshold had
+    // drifted above the fixture's peak.
+    minMoved: 20,
+    edit: { halationStrength: 0.8, halationThreshold: 1.2, halationRadius: 0.012 },
+    radius: 0.012,
+    allowedFailures: 0,
+  },
+  diffusion: {
+    off: { diffusionStrength: 0 },
+    // Diffusion lifts the whole frame, so most samples move.
+    minMoved: 288,
+    edit: { diffusionStrength: 0.85, diffusionRadius: 0.02 },
+    radius: 0.02,
+    /*
+     * Seven of 2304, and not zero, which is a real difference between the two
+     * effects rather than a number tuned until it passed.
+     *
+     * Halation adds a small amount of light above a threshold, so the blur
+     * contributes to a minority of the frame and the second-order sampling term
+     * stays inside its bound everywhere. Diffusion at strength 0.85 makes the
+     * blurred image most of the output *everywhere*, so the same sampling
+     * difference is carried across the whole frame and a handful of samples on
+     * the steepest gradients land just outside a bound derived for the typical
+     * case — measured at 1.56e-2 against 1.30e-2, a factor of 1.2.
+     *
+     * The allowance is sized from the discrimination rather than from the
+     * failure: dropping `bufferScale` from the radius — the error this test
+     * exists to catch and the only test that can — puts **196** samples outside
+     * the bound. Seven against 196 is a factor of 28, and 10 sits far from both.
+     */
+    allowedFailures: 10,
+  },
+}
 
 test.describe('the two-resolution invariant', () => {
   test.beforeEach(async ({ page }) => {
@@ -113,11 +205,19 @@ test.describe('the two-resolution invariant', () => {
     await page.waitForTimeout(200)
   })
 
-  test('renders the same picture at two buffer resolutions', async ({ page }) => {
+  for (const [
+    name,
+    { edit: EDIT, off: OFF, minMoved, radius: RADIUS, allowedFailures },
+  ] of Object.entries(CASES)) {
+  test(`${name} renders the same picture at two buffer resolutions`, async ({ page }) => {
     const result = await page.evaluate<
-      { high: number[]; low: number[]; highSize: number[]; lowSize: number[] },
-      { edit: Record<string, number>; source: { width: number; height: number } }
-    >(({ edit, source }) => {
+      { high: number[]; low: number[]; off: number[]; highSize: number[]; lowSize: number[] },
+      {
+        edit: Record<string, number>
+        off: Record<string, number>
+        source: { width: number; height: number }
+      }
+    >(({ edit, off, source }) => {
       const renderer = (window as unknown as { __photolabRenderer: RendererLike })
         .__photolabRenderer
       renderer.stop()
@@ -131,7 +231,7 @@ test.describe('the two-resolution invariant', () => {
        * and a coarse one avoids conflating the interpolation with the effect.
        */
       const GRID = 48
-      const renderAt = (width: number, height: number): number[] => {
+      const renderAt = (width: number, height: number, override?: Record<string, number>): number[] => {
         const target = renderer.graph.pool.acquire(width, height)
         const context = {
           resolution: [width, height] as const,
@@ -141,7 +241,7 @@ test.describe('the two-resolution invariant', () => {
         renderer.graph.render(
           {
             ...renderer.input,
-            edit: { ...renderer.input.edit, ...edit },
+            edit: { ...renderer.input.edit, ...edit, ...(override ?? {}) },
             view: { ...renderer.input.view, toneMap: false, gamutCompress: false },
           },
           context,
@@ -180,10 +280,13 @@ test.describe('the two-resolution invariant', () => {
       return {
         high: renderAt(highSize[0] ?? 0, highSize[1] ?? 0),
         low: renderAt(lowSize[0] ?? 0, lowSize[1] ?? 0),
+        // The same buffer with the effect turned off, so the test can count how
+        // much of the frame the effect actually reaches.
+        off: renderAt(highSize[0] ?? 0, highSize[1] ?? 0, off),
         highSize,
         lowSize,
       }
-    }, { edit: EDIT, source: SOURCE })
+    }, { edit: EDIT, off: OFF, source: SOURCE })
 
     expect(result.high.length).toBe(result.low.length)
 
@@ -213,8 +316,32 @@ test.describe('the two-resolution invariant', () => {
      * storage adds its own floor on top.
      */
     const coarseTexel = 1 / (result.lowSize[0] ?? 1)
-    const samplingRatio = coarseTexel / EDIT.halationRadius
+    const samplingRatio = coarseTexel / RADIUS
     const tolerance = 2 * samplingRatio * samplingRatio * spread + 2 ** -11
+
+    /*
+     * Non-vacuity, asserted as a count before anything else is checked.
+     *
+     * The microcontrast case was written and passed and was **measuring
+     * nothing**: the fixture's finest structure is a Gaussian of sigma 144
+     * source pixels and the radius under test was 29, so the unsharp mask had
+     * almost no high frequencies to act on. It passed just as happily with the
+     * radius mutated. A test that cannot see the effect cannot see an error in
+     * it, and this suite already records three checks that passed by not
+     * running.
+     *
+     * So: how many samples does the effect actually move, compared with the same
+     * render with it switched off? If that number is small the comparison below
+     * is not measuring the effect, whatever it reports.
+     */
+    const moved = result.high.filter(
+      (value, i) => Math.abs(value - (result.off[i] ?? value)) > tolerance,
+    ).length
+    expect(
+      moved,
+      `${name} moves only ${moved} of ${result.high.length} samples, so the ` +
+        `comparison below would pass whether or not the radius is right`,
+    ).toBeGreaterThanOrEqual(minMoved)
 
     const failures: string[] = []
     for (let i = 0; i < result.high.length; i++) {
@@ -231,7 +358,10 @@ test.describe('the two-resolution invariant', () => {
     }
 
     expect(
-      `${failures.length} of ${result.high.length} samples disagree\n${failures.slice(0, 6).join('\n')}`,
-    ).toBe(`0 of ${result.high.length} samples disagree\n`)
+      failures.length,
+      `${failures.length} of ${result.high.length} samples disagree, ` +
+        `allowance ${allowedFailures}\n${failures.slice(0, 6).join('\n')}`,
+    ).toBeLessThanOrEqual(allowedFailures)
   })
+}
 })

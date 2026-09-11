@@ -66,6 +66,12 @@ export const AXIS_PARAMETERS: Record<PresetAxis, readonly string[]> = {
     'aberration',
     'diffusionStrength',
     'diffusionRadius',
+    'microcontrast',
+    'microcontrastRadius',
+    // In the film stage, and on the camera axis, which is the clearest case for
+    // why this table is written against parameters rather than stages.
+    'lightLeakStrength',
+    'lightLeakPosition',
     'vignette',
     'grainSize',
   ],

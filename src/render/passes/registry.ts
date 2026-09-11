@@ -19,6 +19,7 @@ import { contrastPass } from './contrast'
 import { displayPass } from './display'
 import { exposurePass } from './exposure'
 import { grainPass } from './grain'
+import { lightLeakPass } from './lightLeak'
 import { HALATION_PASSES } from './halation'
 import { hslPass } from './hsl'
 import { imageSourcePass } from './imageSource'
@@ -68,6 +69,10 @@ export function registeredPasses(curvePass: Pass, filmCurvesPass: Pass): readonl
     // The lens stage, in physical order: the glass bends the image, splits it by
     // wavelength, scatters it, and falls off toward the corners.
     ...LENS_PASSES,
+    // First inside the film stage. Light through a seam reaches the emulsion
+    // before anything the emulsion does to it, so halation blooms it and the
+    // characteristic curves develop it as exposure.
+    lightLeakPass,
     ...HALATION_PASSES,
     filmCurvesPass,
     // Grain last inside the film stage, and registration order is what decides

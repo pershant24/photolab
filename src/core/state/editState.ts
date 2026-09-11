@@ -127,6 +127,17 @@ export interface EditState {
   readonly aberration: number
   readonly diffusionStrength: number
   readonly diffusionRadius: number
+  /**
+   * Acutance: local edge contrast, as an unsharp mask.
+   *
+   * A lens property rather than a post-process, which is why it is in the lens
+   * stage and before the emulsion. Sharpening after grain would sharpen grain.
+   */
+  readonly microcontrast: number
+  readonly microcontrastRadius: number
+  /** Stray light through a seam in the body. A camera parameter, in the film stage. */
+  readonly lightLeakStrength: number
+  readonly lightLeakPosition: number
   readonly vignette: number
 
   /** How much scattered light to add back. 0 is off. */
@@ -332,6 +343,76 @@ const SCALARS: readonly ScalarParameter[] = [
   },
   {
     kind: 'scalar',
+    key: 'microcontrast',
+    label: 'Microcontrast',
+    // The amount of the unsharp difference added back. Capped at 1 rather than
+    // at some larger number on purpose: a control that can only be pushed to
+    // where it still looks like a lens is more useful than one that cannot.
+    //
+    // Looked at on a photograph at the default radius: 0.3 is a crisper lens,
+    // 0.6 is clearly crisper and still clean, and 1.0 is the most that reads as
+    // acutance rather than as sharpening. The radius is the parameter that
+    // actually decides which of the two it is, and it is capped for that reason.
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'microcontrastRadius',
+    label: 'Microcontrast radius',
+    // A fraction of the source long edge, like every other spatial parameter.
+    // Much smaller than diffusion's: acutance is about the immediate
+    // neighbourhood of an edge, and a large radius here is what produces a halo
+    // instead of a crisper edge.
+    //
+    // The maximum is 0.01 because that is where looking at it says the effect
+    // changes character. At full amount on a real photograph: 0.004 and 0.006
+    // read as a crisper lens, 0.010 begins to show a bright rim where a roofline
+    // meets dark trees, 0.014 has a distinct band, and 0.02 outlines the whole
+    // boundary. Past about 0.01 this stops being acutance and becomes local
+    // contrast — a real effect, but not the one this control is named for, and
+    // shipping it under this name would make the parameter dishonest.
+    min: 0.0005,
+    max: 0.01,
+    step: 0.0005,
+    defaultValue: 0.004,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'lightLeakStrength',
+    label: 'Light leak',
+    // Relative exposure added at the entry point. Above about 0.6 the leak
+    // clips the shoulder over a large part of the frame, which is what a badly
+    // fogged frame looks like and is a legitimate place for the control to
+    // reach.
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'lightLeakPosition',
+    label: 'Leak position',
+    // Once around the perimeter, from the left edge, clockwise. One parameter
+    // rather than an x and a y, because a leak enters at an edge and a
+    // two-coordinate control would let it be placed in the middle of the frame
+    // where no seam is.
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: 0.12,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
     key: 'vignette',
     label: 'Vignette',
     min: 0,
@@ -491,6 +572,10 @@ export const DEFAULT_EDIT_STATE: EditState = {
   aberration: 0,
   diffusionStrength: 0,
   diffusionRadius: 0.01,
+  microcontrast: 0,
+  microcontrastRadius: 0.004,
+  lightLeakStrength: 0,
+  lightLeakPosition: 0.12,
   vignette: 0,
   halationStrength: 0,
   halationThreshold: 2,
