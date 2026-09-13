@@ -112,6 +112,16 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
   ['halationBlurH', 'halationBlurV', 'the separable pair, in order'],
   ['halationBlurV', 'halationComposite', 'the halo is composited once it is blurred'],
   ['halationComposite', 'filmCurves', 'halation is exposure; the curves turn it into density'],
+  // The channel mixer between halation and the curves. After halation because
+  // halation is light, and the emulsion records scattered light through the same
+  // spectral sensitivity as everything else — a mixer running earlier would
+  // leave a warm halo on a black and white frame.
+  ['halationComposite', 'monochrome', 'scattered light is recorded through the same sensitivity'],
+  [
+    'monochrome',
+    'filmCurves',
+    'the emulsion decides what it records before the curves decide how densely',
+  ],
   ['filmCurves', 'grain', 'grain magnitude depends on a density that does not exist yet'],
 
   // Film before grade. A grade is a human interpreting a developed negative.

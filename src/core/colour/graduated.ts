@@ -16,9 +16,24 @@
  * is worth stating plainly because it is the opposite of the vignette's: **this
  * does not pass through the film curves, so it does not vary by stock.**
  *
- * If the glass-filter behaviour is ever wanted, it is a different pass in the
- * lens stage rather than a parameter on this one. The two are not the same
- * effect with a switch.
+ * # These are two tools, and this is one of them
+ *
+ * Stating it that way rather than as a limitation, because it is a decision and
+ * the other half is cheap now that this half exists.
+ *
+ * A grad used as a **colourist's tool** — recovering a sky, balancing a frame,
+ * burning in a corner — is a decision about a developed image, and it belongs
+ * here in the grade stage. A grad standing in for **physical ND glass on the
+ * lens** is part of the exposure, and belongs in the lens stage, where its
+ * darkening would pass through the characteristic curves and the same setting
+ * would look different under different stocks. The vignette is measured doing
+ * exactly that: a corner-to-centre ratio of 0.52, 0.59 and 0.66 through three
+ * stocks, from a control that never touched them.
+ *
+ * Both are legitimate and they are genuinely different effects that happen to
+ * have the same shape. The colourist's one is built. The glass one is a second
+ * pass reusing this geometry with a different registration, not a parameter on
+ * this one, and nothing here has to change to add it.
  *
  * # Exposure is a linear multiply, which is only obvious once you look
  *

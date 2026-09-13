@@ -2039,6 +2039,32 @@ evidence that distinguishes "ran and passed" from "did not run".
 It is a mechanical check, which is the point. "Does this test look like it
 runs?" is a judgement, and the three above all looked fine.
 
+### The inverse: a check that ran so hard its neighbours could not
+
+Those three passed by not running. This one ran, passed, and **made its file's
+results unreliable** — which belongs beside them because it produces the same
+end state, a green suite that is not evidence, by the opposite mechanism.
+
+A bit-exactness check in `tests/golden/graduated.spec.ts` called `expect` once per
+channel per unmasked pixel: 161,000 assertions. It passed, in six minutes, and
+the five agreement tests in the same file then failed in **150ms each** with the
+renderer gone. They had passed moments before and passed again in isolation.
+
+Two things follow, and the second is the general one.
+
+**Failures in that file were not independent.** A change touching none of those
+five could have turned them red, and a reader would have gone looking for a
+defect in the graduated filter's geometry. Test independence is usually
+discussed as shared state; this was shared *resource*, and it is easier to
+create by accident.
+
+**Sampling a continuous space beats exhausting it.** The check counts mismatches
+and asserts once now: same coverage, 53,760 pixels examined, three seconds
+instead of six minutes, and the file went from 6.3 minutes to 10 seconds. There
+was never a reason to assert per pixel — the assertion is "none of them moved",
+which is one claim about a population, and it was written as 161,000 claims about
+individuals.
+
 A related case, from the boundary work and worth recording because it is the
 same shape at a smaller scale: `tests/unit/boundaries.test.ts` passed under
 Vitest while `tsc --noEmit` rejected it, because indexing a `Vec3` with a loop
@@ -2567,6 +2593,215 @@ bottom, so the horizontal seam at y = 300 of 360 sits at a coordinate of
 along the seam, which is where a position error shows; a flat region would hide
 one. Watched: reading the gradient from the buffer instead of the frame gives
 3.4e-1 against a 1.8e-2 tolerance.
+
+## The stock axis: a preset that was not what it said it was
+
+### Contrast is not what separates reversal from negative, and that is why it shipped
+
+`stock-punchy-reversal` shipped describing "a hard shoulder ... reversal film
+rather than negative". It was a negative.
+
+Nothing caught it because nothing measured **shape**. The crossover assertions
+check that a stock has character; the occupancy assertion checks its control
+points are somewhere a photograph has pixels. A library can satisfy both while
+being three tunings of one idea — and it was: three negatives, one of them
+wearing the wrong name.
+
+The trap is that the obvious discriminator does not work. **A high-gamma
+negative looks contrasty and still rolls off asymptotically over many stops.**
+Reversal compresses its highlights over about one stop and then terminates. Slope
+at grey says nothing about that, so raising contrast until a stock "looks punchy"
+produces a punchy negative, which is exactly what happened.
+
+`src/core/colour/curveShape.ts` measures the property that does discriminate: the
+stops between the slope leaving its straight section and the slope dying.
+
+| stock | gamma at grey | slope at +4 stops, relative | shoulder |
+|---|---|---|---|
+| warm-portrait | 1.00 | 0.96 | never terminates |
+| punchy-negative | 1.12 | **0.90** | **never terminates** |
+| muted-documentary | 0.85 | 0.91 | never terminates |
+| vivid-reversal | 1.70 | 0.001 | **1.31 stops** |
+| cool-reversal | 1.94 | 0.001 | **1.29 stops** |
+
+Renamed rather than reshaped. The curve is a good punchy negative and the only
+thing wrong with it was the label; reshaping would have thrown away a working
+look to rescue a name, and the library needed genuine reversal stocks either way.
+
+### The metric was wrong twice before it was right, and both failures are instructive
+
+**"Reaches its maximum" is not discriminating.** Every curve reaches a maximum at
+the end of its domain. A straight line reaches its maximum at the top and reports
+a shoulder of *zero* stops, which would classify it as the most reversal-like
+curve in the library — a metric pointing exactly backwards, which is the gamut
+fixture's failure in a new place. The measurement is of the **slope** instead,
+and a curve whose slope never falls to a twentieth of its gamma is reported as
+`Infinity` rather than as a large number, because "does not terminate" is a
+different statement from "terminates late".
+
+**The straight section is found from grey, not from the global maximum.**
+Searching for the steepest point anywhere found the **toe** on all three shipping
+stocks — they are steepest in the deep shadows, by a few percent — so the
+reported shoulder began five stops *under* grey and ran fifteen stops wide.
+Arithmetically correct, meaningless. Every stock here is anchored at middle grey
+by construction, so the slope there is the straight-line gamma by definition.
+
+### The LUT resolution derivation meets the case it was built for
+
+Stage 6 sizes each lookup table from the curve's own second derivative. Until now
+it had only ever seen gentle S-curves in production — every negative in the
+library sits at or near the floor of 64.
+
+| curve | samples |
+|---|---|
+| the three negatives | 64, 112, 72 |
+| **the two reversal stocks** | **279 – 303** |
+| the three monochrome stocks | 243 – 287 |
+| "sharp knee" test case | 1237 |
+| pathological test case | 4096 (the ceiling) |
+
+Reversal asks for **2.7 to 4.7 times** what the negatives do and lands a quarter
+of the way to the sharp knee, nowhere near the ceiling. That is the machinery
+working rather than straining: a terminating shoulder is a genuinely sharper
+shape and it got genuinely more samples, without anyone choosing a number.
+
+### Monochrome: three identical LUTs, and why that is not waste
+
+The channel mixer collapses the frame to one value in the film stage, and the
+three characteristic curves then act on that value. Three identical curves bake
+into three identical lookup tables and the film pass samples all three.
+
+A dedicated single-channel path would save two texture fetches per pixel in a
+stage that already runs several separable blurs, and would cost a second
+implementation of the film stage to keep in agreement with the first. That trade
+is bad on its own. What settles it is that **three curves acting on one channel
+is not waste, it is toning** — it is exactly how a sepia or selenium print is
+built, and it would be unreachable behind a single-channel path.
+
+So the machinery is kept, and the risk it creates is asserted instead: three
+curves that drifted apart would put a quiet colour cast into a black and white
+photograph, strongest in the shadows and highlights, and **the crossover
+assertions are skipped for these stocks precisely because a monochrome frame has
+none** — so nothing else would catch it.
+
+Watched, at both levels, by moving one monochrome channel's gamma by 2%:
+
+| | correct | drifted |
+|---|---|---|
+| `film-stock.test.ts`, curves identical | passes | **2 failures** |
+| `monochrome.spec.ts`, worst channel spread | 7.7e-4 | **1.9e-2** |
+
+The declared flag and the identical curves are asserted **against each other**
+in both directions, so the flag cannot drift away from what it describes.
+
+### Coloured grain on a black and white photograph
+
+The defect the neutrality test was written for, missed by the first version of
+that test, and found only because the measurement was questioned.
+
+Grain is **per-channel with three independent seeds**, deliberately: colour film
+has three emulsion layers that develop separately, and that independence is what
+makes film grain coloured rather than the luminance noise a sensor produces.
+Grain also runs *after* the characteristic curves, which puts it downstream of
+the mixer. So three independent noise fields were being laid over a frame that
+had already been collapsed to one channel.
+
+A black and white film has **one layer**. Its grain is a single field, which is
+to say luminance noise — exactly what the colour path goes out of its way to
+avoid, and exactly right here.
+
+| | before | after |
+|---|---|---|
+| worst relative channel spread, mono-hard | **1.58e-1** | 9.6e-4 |
+| mono-neutral | 6.7e-2 | 9.6e-4 |
+
+### Why the first neutrality test could not see it
+
+This is the part worth keeping, because the test was green and the defect was
+158 times its own tolerance.
+
+It ran the presets **as they ship** on a 320-pixel fixture. Grain's default
+period is 0.0009 of the long edge — five source pixels on a 6000-pixel image, and
+a third of a pixel there — so the grain pass correctly faded it to nothing. The
+test was measuring a frame with no grain in it and reporting that the grain was
+neutral.
+
+The tell was in the numbers and went unread: two stocks at **grain 0.30 and 0.72**
+reported a channel spread of **7.73e-4 and 7.73e-4** — identical to three
+figures across a 2.4x difference in the parameter that was supposedly under
+test. A measurement whose floor lies somewhere else entirely (half-float
+quantisation, here) reads the same however you move the thing you are measuring.
+
+The fix is the guard this file already has four levels of: **count that the
+effect is present before believing anything about it.** The test now renders the
+same preset with `grainStrength: 0`, asserts the two differ over at least a fifth
+of the frame, and raises the grain size until the period resolves at the fixture
+size. Grain moves 42,000 to 58,000 of 76,800 pixels; the neutrality claim now
+means something.
+
+Two general points. **Testing a preset at its shipping values is not the same as
+testing it**, when a shipping value interacts with the fixture size. And an
+effect that correctly disappears at small scales will silently disable any test
+that forgets to check it is there.
+
+### The mixer is after halation, which is the half of the placement worth arguing
+
+"Before the characteristic curves" would allow first-in-the-film-stage. It goes
+after halation because halation is *light*: it scatters off the base and
+re-exposes the emulsion, and the emulsion records that through the same spectral
+sensitivity as everything else. A mixer running earlier leaves a warm halo on a
+black and white frame.
+
+The same argument carries two effects with it for free. The light leak and the
+date stamp both inject before the film stage, so both are collapsed to grey —
+which is what those things look like on black and white film, and neither needed
+a line of code.
+
+### The census caught two defects in itself
+
+Worth recording because both are failures this file already has sections about,
+committed by the test written to detect them.
+
+**Hue on the neutral axis.** The first census reported crossovers of -90, +158
+and -68 degrees for the three monochrome stocks, which have no colour at all.
+`film-stock.test.ts` documents exactly this — `atan2(0, 0)` returns whatever the
+rounding gives — and the clustering check would have **accepted that noise as
+separation between two stocks**. Chroma now gates the hue, and the reading is
+`n/a`.
+
+**A wrapped angle cannot carry direction.** The test for "the two reversal stocks
+drift in opposite directions" compared the sign of the shadow-to-highlight hue
+difference. Every stock in the library measures near ±180 degrees — which is what
+crossover *means*, the two ends landing on opposite hues — so the sign is decided
+by which way the wrap fell. Vivid at -177 and cool at +178 passed a test for
+being opposed while drifting the same way. Direction is now taken from which end
+is warm: the blue-yellow of a neutral three stops under grey, with a non-vacuity
+floor so the sign cannot come from rounding.
+
+### The spread, measured
+
+Within families, because monochrome stocks sit trivially far from colour ones on
+crossover and saturation — pooling all eight would report a beautifully spread
+axis that is two clusters with a chasm between them.
+
+| | range |
+|---|---|
+| gamma at grey, colour | 0.85 – 1.94 |
+| gamma at grey, monochrome | 1.08 – 1.72 |
+| density floor, linear | 6.7e-3 (lifted matte) – 1.4e-4 (near black), a factor of **46** |
+| shadow blue-yellow | −4.2 (coolest) – +2.1 (warmest) |
+| grain | 0.14 – 0.72 |
+| shoulder | never terminates, or 1.3 stops |
+
+Every pair within a family is clearly apart on at least one dimension, asserted
+per dimension rather than as one normalised distance — the dimensions are in
+different units and normalising them would bury the judgement in a scale factor
+nobody could argue with.
+
+**Not tuned against photographs.** The portrait and low-key frames are not in the
+repository, so the numbers above are curve measurements and the only frame these
+were looked at on is the single landscape. Skin is where crossover most obviously
+succeeds or fails, and none of these eight stocks has been judged on any.
 
 ## A duplicated guard does not inherit the original's fixes
 

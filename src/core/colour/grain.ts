@@ -111,6 +111,38 @@ export const GRAIN_MAX_DENSITY_SWING = 0.012
 export const GRAIN_CHANNEL_SIZES: readonly [number, number, number] = [1, 0.88, 1.18]
 
 /**
+ * Noise seeds for the three layers of a colour emulsion.
+ *
+ * Distinct, so the three develop independently — which is what makes film grain
+ * coloured rather than the luminance noise a digital sensor produces.
+ */
+export const GRAIN_CHANNEL_SEEDS: readonly [number, number, number] = [0, 17, 41]
+
+/**
+ * Seeds and sizes for a **monochrome** emulsion, which has one layer.
+ *
+ * The colour case's independence is a fact about there being three layers. A
+ * black and white film has one, so its grain is a single field affecting the
+ * whole image equally — luminance noise, which is exactly what the colour path
+ * goes out of its way to avoid and is exactly right here.
+ *
+ * This was a shipped defect rather than a foreseen case. The channel mixer
+ * collapses the frame to one value in the film stage, grain runs after the
+ * characteristic curves with three independent seeds, and the result was
+ * **coloured noise on a black and white photograph** — measured at a relative
+ * channel spread of 1.6e-1 against a tolerance of 1e-3.
+ *
+ * It survived the first version of the neutrality test because that test ran the
+ * presets at their shipping grain size on a 320-pixel fixture, where the period
+ * is a third of a buffer pixel and the grain pass correctly fades it to nothing.
+ * The test could not distinguish neutral grain from absent grain, and it was
+ * measuring absent grain. `tests/golden/monochrome.spec.ts` now counts that grain
+ * moved something before it believes anything about colour.
+ */
+export const MONOCHROME_GRAIN_SEEDS: readonly [number, number, number] = [0, 0, 0]
+export const MONOCHROME_GRAIN_SIZES: readonly [number, number, number] = [1, 1, 1]
+
+/**
  * # The proxy cannot show fine grain, and should not pretend to
  *
  * Grain has a physical size, expressed here as a fraction of the source long

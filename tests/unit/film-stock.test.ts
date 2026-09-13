@@ -35,14 +35,70 @@ function applyStock(
   return [channel(stock.red), channel(stock.green), channel(stock.blue)]
 }
 
+/**
+ * The colour stocks. Every crossover assertion below is scoped to these.
+ *
+ * A monochrome frame has no crossover to have, so those assertions would fail on
+ * one — which is correct behaviour from the test and would be the wrong thing to
+ * loosen. They are narrowed to the population they are about instead, and the
+ * monochrome stocks get the assertion that is about them.
+ */
+const COLOUR_STOCKS = FILM_STOCKS.filter((stock) => !stock.monochrome)
+const MONOCHROME_STOCKS = FILM_STOCKS.filter((stock) => stock.monochrome)
+
 describe('film stocks', () => {
+  it('has both families, so neither set of assertions is vacuous', () => {
+    // The guard on the two filters above. A `monochrome` flag typo would empty
+    // one of them, and every assertion scoped to it would pass by iterating
+    // nothing — which is the occupancy rule pointed at a test's own population.
+    expect(COLOUR_STOCKS.length, 'no colour stocks to assert crossover on').toBeGreaterThan(2)
+    expect(MONOCHROME_STOCKS.length, 'no monochrome stocks to assert neutrality on').toBeGreaterThan(
+      2,
+    )
+  })
+
   it('carries three independent curves, not one shared shape', () => {
     // The feature, stated as a property. Three curves that happen to be equal
     // would pass every arithmetic test and produce no crossover at all.
-    for (const stock of FILM_STOCKS) {
+    for (const stock of COLOUR_STOCKS) {
       expect(stock.red).not.toEqual(stock.green)
       expect(stock.green).not.toEqual(stock.blue)
       expect(stock.red).not.toEqual(stock.blue)
+    }
+  })
+
+  it('gives every monochrome stock three IDENTICAL curves', () => {
+    /*
+     * The other half, and the one that is load-bearing.
+     *
+     * The mixer has already collapsed the frame to a single value by the time
+     * the curves run, so three curves that drifted apart would put colour back
+     * into a black and white photograph — a quiet cast, strongest wherever the
+     * curves differ most, which is exactly the shadows and highlights someone
+     * would be looking at.
+     *
+     * Nothing else in the suite would catch it: the crossover assertions are
+     * skipped for these stocks precisely because a monochrome frame has none.
+     * This assertion is what stands in their place.
+     */
+    for (const stock of MONOCHROME_STOCKS) {
+      expect(stock.red, `${stock.id} red and green differ`).toEqual(stock.green)
+      expect(stock.green, `${stock.id} green and blue differ`).toEqual(stock.blue)
+    }
+  })
+
+  it('does not mark a colour stock monochrome, or leave a grey one unmarked', () => {
+    // The converse, so the flag cannot drift away from the curves it describes.
+    // Declared and inferred are different statements — "this stock is
+    // monochrome" and "this stock's curves happen to match" — and a stock where
+    // they disagree is a defect whichever way round it is.
+    for (const stock of FILM_STOCKS) {
+      const identical =
+        JSON.stringify(stock.red) === JSON.stringify(stock.green) &&
+        JSON.stringify(stock.green) === JSON.stringify(stock.blue)
+      expect(identical, `${stock.id} is marked monochrome: ${stock.monochrome === true}`).toBe(
+        stock.monochrome === true,
+      )
     }
   })
 
@@ -138,7 +194,7 @@ describe('crossover', () => {
     // colour at all yields an arbitrary angle. The first version of this test
     // measured hue alone and reported 68 degrees of "crossover" from three
     // identical curves, which was floating point noise on two neutrals.
-    for (const stock of FILM_STOCKS) {
+    for (const stock of COLOUR_STOCKS) {
       const d = drift(stock)
       expect(d.shadowChroma, `${stock.id}: shadows have no colour to have a hue`).toBeGreaterThan(2)
       expect(d.highlightChroma, `${stock.id}: highlights have no colour`).toBeGreaterThan(2)

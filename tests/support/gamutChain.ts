@@ -235,7 +235,11 @@ export const CENSUS_GRADES: readonly Grade[] = [
   { name: 'sat +1.0 only (max)', patch: { hslSaturation: ALL(1) } },
   {
     name: 'punchy +1.0 sat (max)',
-    patch: { ...stock('punchy-reversal'), filmStrength: 0.8, hslSaturation: ALL(1) },
+    // Renamed from `punchy-reversal` when it was measured and found to be a
+    // negative — the CURVES are untouched, so every pinned figure below still
+    // describes the same arithmetic. A rename that changed the shape would
+    // have invalidated the census, which is why this one is called out.
+    patch: { ...stock('punchy-negative'), filmStrength: 0.8, hslSaturation: ALL(1) },
   },
   { name: 'exposure +1.5 contrast 1.4', patch: { exposure: 1.5, contrast: 1.4 } },
 ]

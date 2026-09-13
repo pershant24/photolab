@@ -51,10 +51,26 @@ const UPDATE = process.env.UPDATE_README_IMAGES === '1'
 /** Above encoder noise, far below any preset change worth making. */
 const MAX_DELTA_E = 2
 
-const TARGETS = STOCK_PRESETS.map((preset) => ({
-  file: `${DIR}/${preset.id.replace(/^stock-/, '')}.jpg`,
-  preset,
-}))
+/**
+ * The stocks the README shows, which is no longer all of them.
+ *
+ * Eight stocks ship. Eight panels is two megabytes of JPEG on a page whose job
+ * is to make someone understand the project in thirty seconds, so the README
+ * shows one from each family instead and says how many there are.
+ *
+ * Curating a subset reintroduces a risk the rest of this file exists to remove:
+ * the subset can go stale in a way the images cannot, by quietly becoming three
+ * stocks of the same kind — which is exactly what the library was before this
+ * work, three negatives with one of them named reversal. So the spanning
+ * property is asserted below rather than left to whoever edits the list.
+ */
+const SHOWN = ['stock-warm-portrait', 'stock-vivid-reversal', 'stock-mono-red-filter']
+
+const TARGETS = SHOWN.map((id) => {
+  const preset = STOCK_PRESETS.find((p) => p.id === id)
+  if (!preset) throw new Error(`readme-images: no preset "${id}"`)
+  return { file: `${DIR}/${preset.id.replace(/^stock-/, '')}.jpg`, preset }
+})
 
 function meanDeltaE(a: Buffer, b: Buffer): number {
   // Decoding happens in the page; this only runs on raw RGB triples.
@@ -80,6 +96,22 @@ function meanDeltaE(a: Buffer, b: Buffer): number {
 }
 
 test.describe('the README images match the presets they claim to show', () => {
+  test('shows one stock from each family, not three of a kind', () => {
+    // The guard on the curation above. A negative, a reversal stock and a
+    // monochrome one — the three things the axis now spans, and the claim the
+    // README's table is making by existing.
+    const stocks = TARGETS.map(({ preset }) => {
+      const id = (preset.patch.filmCurveGreen ? preset.id : preset.id).replace(/^stock-/, '')
+      return id
+    })
+    expect(stocks.some((id) => id.includes('reversal')), 'no reversal stock shown').toBe(true)
+    expect(stocks.some((id) => id.includes('mono')), 'no monochrome stock shown').toBe(true)
+    expect(
+      stocks.some((id) => !id.includes('reversal') && !id.includes('mono')),
+      'no colour negative shown',
+    ).toBe(true)
+  })
+
   for (const { file, preset } of TARGETS) {
     test(`${file} is a current render of "${preset.name}"`, async ({ page }) => {
       test.setTimeout(180_000)
