@@ -2252,3 +2252,168 @@ right there in the first copy and the second copy could not benefit from it.
 **Two copies of a rule are two chances to get it wrong and two places to fix
 it.** There is now one list, in `tests/support/trademarks.ts`, used by both. The
 consolidation is the small part; the reason is worth keeping.
+
+## The tiling audit
+
+Every spatial pass, and what its tiling tests can and cannot see. Run because a
+new spatial pass was about to be added and the question "is the existing tile
+coverage adequate to copy" deserved an answer rather than a guess.
+
+| pass | x varied | y varied | scale varied | seam where the effect is strongest |
+|---|---|---|---|---|
+| distortion | yes, 2×2 split at 400/300 of 480×360 | yes | n/a — no scale-dependent term | **yes**, deliberately off-centre |
+| chromatic aberration | yes, same | yes | n/a | yes |
+| vignette | yes, same | yes | n/a — position only | yes |
+| diffusion | yes, same | yes | **no**, until this audit | yes |
+| halation | yes, 2×2 — but **centred, at 1:1** | yes | yes, `two-resolution` | partial: lamps offset from the seam on purpose |
+| grain | yes, 2×2 at 173/131, **at scale 2** | yes | yes, `grain-resolution` | n/a, per-pixel |
+
+### The finding: a tiled-vs-whole comparison cannot see a scale error
+
+This is the part worth keeping, and it is about the *comparisons* rather than
+the fixtures.
+
+Almost every tiling test renders a tiled leg and a whole leg **at the same
+scale**. An error that depends only on scale is therefore carried identically by
+both legs and divides out. `lens.spec.ts` runs at 2:1 and its own comment says
+it "varies origin and scale together" — it varies origin *at* a scale of two,
+which catches the origin×scale interaction and cannot catch a pure scale error.
+
+Measured, not argued. Three mutations, and which tests caught each:
+
+| mutation | caught by |
+|---|---|
+| radius against `uResolution` | 6 tests, including `tile-overlap` and `export-parity` |
+| frame position dropping `uSourceRect` | 10 tests across `lens.spec` and `export-parity` |
+| radius dropping `bufferScale` — **an identity at 1:1** | **one test**: `two-resolution.spec.ts` |
+
+`tile-overlap` passed the third. `export-parity` passed it. `lens.spec`'s 2:1
+diffusion case passed it. Only the test that renders the *same region* at two
+different scales could see it.
+
+### The gap, and that it was a fact about the code rather than the tests
+
+`two-resolution.spec.ts` exercised halation and nothing else, so halation was
+the only radius with coverage against that class of error. Diffusion was safe
+only because it delegates to the same `blurRadiusInBufferPixels` — and
+`halation.glsl` already wraps that in a named function of its own, which is
+exactly the shape of a path about to diverge.
+
+That is not a tested pass. It is an untested pass that happens to share code
+with a tested one, which is a property of today's implementation and not
+something any test asserts.
+
+`two-resolution.spec.ts` now runs per case, with diffusion added. **Any radius
+parameter not in that list has no coverage of its own against a scale error**,
+which is now stated where someone adding one will read it.
+
+### Diffusion needs an allowance where halation needs none
+
+Seven of 2304 samples land just outside the derived bound for diffusion — 1.56e-2
+against 1.30e-2, a factor of 1.2 — and zero do for halation. That is a real
+difference between the effects rather than a number tuned until it passed.
+
+Halation adds light above a threshold, so the blur contributes to a minority of
+the frame. Diffusion at strength 0.85 makes the blurred image most of the output
+everywhere, so the same second-order sampling difference is carried across the
+whole frame and the steepest gradients land just outside a bound derived for the
+typical case.
+
+The allowance is sized from the discrimination rather than from the failure: the
+mutation puts **196** samples outside the bound against seven for correct code, a
+factor of 28, and the allowance of 10 sits far from both.
+
+## Pin it or regenerate it: the question is past or present
+
+Two artifacts of the same class, opposite correct answers, and getting this
+backwards is easy because the first lesson is so memorable.
+
+The **census grades** are pinned as literals. The census is a claim about *the
+past*: these figures were measured on these inputs. If the inputs move, the
+figures stop being reproducible and the table goes on looking authoritative
+while describing something that no longer exists.
+
+The **README images** regenerate from the preset definitions, and staleness is a
+test failure. The README is a claim about *the present*: this is what the
+application does. Pinning them would have frozen a picture of a library that had
+since been retuned — which is exactly what had happened, and the regeneration
+test caught it at 4.3 to 7.9 mean ΔE on its first run.
+
+**The distinguishing question is whether the artifact is a claim about the past
+or about the present**, and "pin it so it cannot drift" is the wrong instinct for
+half of them. An artifact documenting the present must drift; the discipline is
+making the drift visible rather than preventing it.
+
+## A fixture can argue for the defect, not merely miss it
+
+This gets its own entry because it is the only failure mode found in this project
+that would have **survived scrutiny** rather than merely evading it.
+
+The first fixture written for the gamut boundary measured **7 with the correct
+operator and 3 with the broken one.** Not insensitive — inverted. Presented with
+those two numbers and no other information, a reasonable person concludes the
+broken operator is the better one, and a suite reporting green on it is not
+failing to detect a defect, it is *arguing the defect is an improvement*.
+
+Every other failure in this file is passive: a check that did not run, a metric
+diluted by content, a domain with no pixels in it. Those are all found by asking
+"is this actually measuring anything?" This one answers yes to that question.
+
+The only defence is the one that caught it: **break the code and watch the
+number move in the direction you expect.** Not "does the test fail" — a test can
+fail for the wrong reason — but does the measurement move the way the physics
+says it should. If it moves the wrong way, the fixture is wrong however sensible
+it looks.
+
+## Microcontrast and light leaks, looked at
+
+### Microcontrast reads as lens character up to a radius, and not past it
+
+The amount is the obvious control and the radius is the one that decides what
+the effect *is*. At full amount on a real photograph, at 1:1:
+
+| radius | what it looks like |
+|---|---|
+| 0.004 (default) | a crisper lens; no visible fringe |
+| 0.006 | clearly crisper, still clean |
+| 0.010 | a bright rim begins where a roofline meets dark trees |
+| 0.014 | a distinct band along that boundary |
+| 0.020 | the whole roof-to-hillside boundary is outlined |
+
+So the maximum is **0.01**, not the 0.02 it was first written with. Past there
+it stops being acutance and becomes local contrast — a real effect, but not the
+one the control is named for, and shipping it under this name would make the
+parameter dishonest.
+
+The amount behaves as expected against a fixed radius: 0.3 is a crisper lens,
+0.6 is clearly crisper and still clean, 1.0 is the most that reads as a lens
+rather than as sharpening. That is why the cap is on the radius rather than on
+the amount — the amount changes how much, the radius changes what.
+
+### The light leak is developed, and it is visible that it is
+
+The claim that injecting before the film stage matters is checkable by turning
+the film stage off and looking at the same leak:
+
+- **with `filmStrength: 0`** the leak is a warm gradient laid over the frame. It
+  reads as something composited.
+- **with a stock** the same leak compresses into the shoulder where it is
+  strongest — the sky under it goes to near-white rather than to orange — and
+  halation blooms it. It reads as light that exposed the emulsion.
+
+That difference is the entire argument for the injection point, and it is worth
+recording that it is legible rather than theoretical.
+
+### What the new parameters did to the camera axis
+
+They separated it further rather than homogenising it, which was the risk. The
+corrected medium format now has the highest acutance at the tightest radius and
+the plastic lens has the least acutance plus a leak — so the two ends of the axis
+now differ on four properties instead of two, and in the same direction each
+time. The soft portrait lens sets no microcontrast at all, which is the honest
+representation of a lens whose character is softness: the control cannot
+subtract acutance, so it adds none.
+
+That last one only works because applying a preset resets its axis first. Before
+that fix, a soft lens applied after a corrected one would have inherited its
+acutance and its radius, and the preset would have quietly been a sharp lens.

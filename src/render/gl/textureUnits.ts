@@ -31,6 +31,15 @@ export const IMAGE_UNIT = 1
 export const CURVE_LUT_UNITS = [2, 3, 4] as const
 
 /**
+ * Units 5, 6 and 8 are claimed by passes that retain their input for a later
+ * composite — diffusion, halation and microcontrast respectively. They are
+ * declared next to the passes that use them rather than here, which is fine
+ * while there are three and would stop being fine at ten: nothing checks them
+ * for collision, so the numbers are listed here as the one place to look before
+ * claiming another.
+ */
+
+/**
  * Reserved for creation and upload. **Never sampled by any shader**, so a stray
  * binding left here cannot affect an image.
  */

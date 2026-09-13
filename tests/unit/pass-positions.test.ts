@@ -55,7 +55,18 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
   // Lens, internally, in the order the glass does it: bend, split by wavelength,
   // scatter, fall off toward the corners.
   ['distortion', 'aberration', 'the glass bends the image before it splits it'],
-  ['aberration', 'diffusionBlurH', 'scattering acts on the image the glass formed'],
+  [
+    'aberration',
+    'microcontrastBlurH',
+    'acutance acts on the image the displaced channels produced, not on each channel',
+  ],
+  ['microcontrastBlurH', 'microcontrastBlurV', 'the separable pair, in order'],
+  ['microcontrastBlurV', 'microcontrastComposite', 'the difference is taken once it is blurred'],
+  [
+    'microcontrastComposite',
+    'diffusionBlurH',
+    'sharpening before the scatter, or it raises the contrast of the haze — the same mistake as sharpening after grain, one stage earlier',
+  ],
   ['diffusionBlurH', 'diffusionBlurV', 'the separable pair, in order'],
   ['diffusionBlurV', 'diffusionComposite', 'the scatter is composited once it is blurred'],
   ['diffusionComposite', 'vignette', 'falloff is illumination, and comes last in the lens'],
@@ -63,7 +74,15 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
   // Lens before film. The lens forms the image the emulsion records, which is why
   // the vignette's darkening passes THROUGH the characteristic curves rather than
   // being applied to a developed picture.
-  ['vignette', 'halationThreshold', 'the lens forms the image the film records'],
+  ['vignette', 'lightLeak', 'the lens forms the image the film records'],
+  // The leak did not come through the lens, so nothing in the lens stage shapes
+  // it — but it reaches the emulsion before the emulsion does anything, so it
+  // must precede both halation and the curves.
+  [
+    'lightLeak',
+    'halationThreshold',
+    'stray light reflects off the film base like any other light',
+  ],
 
   // Film, internally. Halation adds light to the emulsion, so it happens before
   // the curves turn exposure into density; grain depends on the density those

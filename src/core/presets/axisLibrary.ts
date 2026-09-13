@@ -57,6 +57,13 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
       vignette: 0.42,
       diffusionStrength: 0.12,
       diffusionRadius: 0.008,
+      // A decent fixed lens: real acutance, not a great deal of it. No radius,
+      // because the default is already right for it — and saying so explicitly
+      // would say nothing, since a sparse patch drops any value equal to its
+      // default. Omitting it is only safe because applying a preset resets its
+      // axis first: before that, this would have inherited whatever radius the
+      // previous camera set.
+      microcontrast: 0.3,
       grainSize: 0.0011,
     },
   },
@@ -76,6 +83,10 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
       distortion: 0.03,
       aberration: 0.0004,
       vignette: 0.14,
+      // The best lens here, so the highest acutance and the tightest radius: a
+      // well-corrected lens renders a crisp edge rather than a wide one.
+      microcontrast: 0.55,
+      microcontrastRadius: 0.0025,
       grainSize: 0.0005,
     },
   },
@@ -96,6 +107,12 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
       // the hillside entirely.
       diffusionStrength: 0.15,
       diffusionRadius: 0.012,
+      // Barely any acutance, and a leak. Both are the same story: a body that
+      // does not seal and glass that does not resolve.
+      microcontrast: 0.1,
+      microcontrastRadius: 0.006,
+      lightLeakStrength: 0.4,
+      lightLeakPosition: 0.08,
       grainSize: 0.0019,
     },
   },
@@ -113,6 +130,11 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
       vignette: 0.24,
       diffusionStrength: 0.42,
       diffusionRadius: 0.018,
+      // Sets no microcontrast at all, deliberately. Softness is this lens's
+      // entire character, and the control cannot subtract acutance — its minimum
+      // is adding none. So the preset says nothing about it and the axis reset is
+      // what clears whatever the previous camera had, which is the case
+      // `applyAxisPreset` exists for.
       // Was 0.0009, which is the default, so it was dropped as carrying nothing
       // and the preset made no format claim at all. Caught by the assertion that
       // a shipped preset survives sanitising unchanged. A portrait lens of this

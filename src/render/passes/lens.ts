@@ -16,6 +16,8 @@
 
 import aberrationSource from '../shaders/aberration.frag'
 import diffusionBlurSource from '../shaders/diffusionBlur.frag'
+import microcontrastBlurSource from '../shaders/microcontrastBlur.frag'
+import microcontrastCompositeSource from '../shaders/microcontrastComposite.frag'
 import diffusionCompositeSource from '../shaders/diffusionComposite.frag'
 import distortionSource from '../shaders/distortion.frag'
 import vignetteSource from '../shaders/vignette.frag'
@@ -122,6 +124,81 @@ export const diffusionCompositePass: Pass = {
   },
 }
 
+/*
+ * Microcontrast: acutance, as an unsharp mask.
+ *
+ * # Where it sits, and why that is not a preference
+ *
+ * Between aberration and diffusion, and the physics settles both boundaries.
+ *
+ * *Before diffusion*, because diffusion is stray light scattered across the
+ * frame — veiling flare. Sharpening after it would raise the contrast of the
+ * haze, which is the same mistake as sharpening after grain, one stage earlier.
+ * The lens resolves detail, then scatters, then falls off at the corners.
+ *
+ * *After aberration*, because aberration displaces the channels relative to one
+ * another and acutance acts on the image that displacement produced. Sharpening
+ * first would sharpen each channel and then smear the result.
+ *
+ * And because it is in the lens stage at all, it precedes the emulsion, so it
+ * cannot sharpen grain. That falls out of the stage ordering rather than needing
+ * to be arranged.
+ */
+const MICROCONTRAST_ORIGINAL = 'microcontrastSource'
+const MICROCONTRAST_ORIGINAL_UNIT = 8
+
+const microcontrastEnabled = (input: RenderInput): boolean =>
+  input.edit.microcontrast > 0 && input.edit.microcontrastRadius > 0
+
+function microcontrastKernelOverlap(input: RenderInput): number {
+  if (!microcontrastEnabled(input)) return 0
+  const size = sourceSize(input)
+  if (!size) return 0
+  const longEdge = Math.max(size.width, size.height)
+  return Math.ceil(input.edit.microcontrastRadius * longEdge) + 1
+}
+
+function microcontrastBlurPass(id: string, direction: readonly [number, number]): Pass {
+  return {
+    id,
+    stage: 'lens',
+    fragmentSource: () => microcontrastBlurSource,
+    variantKey: () => 'default',
+    enabled: microcontrastEnabled,
+    overlap: microcontrastKernelOverlap,
+    bindUniforms(gl, locate, input) {
+      const radius = locate('uMicrocontrastRadius')
+      if (radius) gl.uniform1f(radius, input.edit.microcontrastRadius)
+      const directionUniform = locate('uBlurDirection')
+      if (directionUniform) gl.uniform2f(directionUniform, direction[0], direction[1])
+    },
+  }
+}
+
+/** The image before the blur, which the composite takes the difference against. */
+export const microcontrastBlurHorizontalPass: Pass = {
+  ...microcontrastBlurPass('microcontrastBlurH', [1, 0]),
+  retainInputAs: MICROCONTRAST_ORIGINAL,
+}
+export const microcontrastBlurVerticalPass = microcontrastBlurPass('microcontrastBlurV', [0, 1])
+
+export const microcontrastCompositePass: Pass = {
+  id: 'microcontrastComposite',
+  stage: 'lens',
+  auxiliaryInput: {
+    key: MICROCONTRAST_ORIGINAL,
+    sampler: 'uOriginal',
+    unit: MICROCONTRAST_ORIGINAL_UNIT,
+  },
+  fragmentSource: () => microcontrastCompositeSource,
+  variantKey: () => 'default',
+  enabled: microcontrastEnabled,
+  bindUniforms(gl, locate, input) {
+    const amount = locate('uMicrocontrast')
+    if (amount) gl.uniform1f(amount, input.edit.microcontrast)
+  },
+}
+
 export const vignettePass: Pass = {
   id: 'vignette',
   stage: 'lens',
@@ -143,6 +220,9 @@ export const vignettePass: Pass = {
 export const LENS_PASSES: readonly Pass[] = [
   distortionPass,
   aberrationPass,
+  microcontrastBlurHorizontalPass,
+  microcontrastBlurVerticalPass,
+  microcontrastCompositePass,
   diffusionBlurHorizontalPass,
   diffusionBlurVerticalPass,
   diffusionCompositePass,

@@ -405,3 +405,58 @@ describe('switching between presets on the same axis', () => {
     ).toBe(true)
   })
 })
+
+describe('the axis reset still holds with the new camera parameters', () => {
+  /**
+   * Re-run of the Part 0 check with two more parameters on the axis, because
+   * that fix is only as good as the coverage of what it resets.
+   *
+   * The plastic lens leaks and the corrected medium format does not mention
+   * leaking, because not leaking is the default and a sparse patch drops it.
+   * The soft portrait lens says nothing about microcontrast for the same
+   * reason — the control cannot subtract acutance, so a soft lens simply adds
+   * none.
+   */
+  const camera = (id: string): AxisPreset => AXIS_PRESETS.find((p) => p.id === id)!
+
+  it('clears a light leak when switching to a camera that does not leak', () => {
+    const plastic = camera('camera-plastic-lens')
+    const medium = camera('camera-medium-format')
+    expect(plastic.patch.lightLeakStrength, 'the plastic lens should leak').toBeGreaterThan(0)
+    expect('lightLeakStrength' in medium.patch, 'medium format should not mention leaking').toBe(
+      false,
+    )
+
+    const after = applyAxisPreset(applyAxisPreset(DEFAULT_EDIT_STATE, plastic), medium)
+    expect(after.lightLeakStrength, 'the leak survived into a sealed camera').toBe(0)
+    expect(after.lightLeakPosition).toBe(DEFAULT_EDIT_STATE.lightLeakPosition)
+  })
+
+  it('clears microcontrast when switching to a lens that adds none', () => {
+    const medium = camera('camera-medium-format')
+    const soft = camera('camera-soft-portrait-lens')
+    expect(medium.patch.microcontrast, 'medium format should be crisp').toBeGreaterThan(0)
+    expect('microcontrast' in soft.patch, 'the soft lens should add no acutance').toBe(false)
+
+    const after = applyAxisPreset(applyAxisPreset(DEFAULT_EDIT_STATE, medium), soft)
+    expect(after.microcontrast, 'acutance survived onto a deliberately soft lens').toBe(0)
+    // And the radius comes back too, which is the case that would otherwise
+    // leave a soft lens sharpening at somebody else's radius if it ever did.
+    expect(after.microcontrastRadius).toBe(DEFAULT_EDIT_STATE.microcontrastRadius)
+  })
+
+  it('still leaves the stock, the grade and the photograph alone', () => {
+    const stock = AXIS_PRESETS.find((p) => p.axis === 'stock')!
+    const grade = AXIS_PRESETS.find((p) => p.axis === 'grade')!
+    const shot = mergeEditState(DEFAULT_EDIT_STATE, { exposure: 0.4, temperature: 5400 })
+    let state = applyAxisPreset(applyAxisPreset(shot, stock), grade)
+    state = applyAxisPreset(state, camera('camera-plastic-lens'))
+    const after = applyAxisPreset(state, camera('camera-medium-format'))
+    expect(after.exposure).toBe(0.4)
+    expect(after.temperature).toBe(5400)
+    expect(after.grainStrength).toBe(
+      applyAxisPreset(DEFAULT_EDIT_STATE, stock).grainStrength,
+    )
+    expect(after.contrast).toBe(applyAxisPreset(DEFAULT_EDIT_STATE, grade).contrast)
+  })
+})
