@@ -2239,6 +2239,45 @@ Only breaking the code distinguished them. "This fixture covers that boundary"
 is a claim about a fixture, and the only evidence for it is watching the fixture
 fail when the boundary is broken.
 
+## The same guard at three levels: the test, the fixture, the comparison
+
+Three rules in this file were written at different times, for different scares,
+against one failure: a check that runs, reports green, and measured nothing.
+Naming them together is the point, because the next instance will arrive at a
+level none of these three covers, and the pattern is easier to recognise from
+three examples than from a statement.
+
+| level | the guard | the question it forces | what it caught |
+|---|---|---|---|
+| the suite | the test-count rule | did this test run at all? | a census spec reading its inputs from a session-named scratch path, which would have skipped on every machine forever |
+| the fixture | the zero-crossing assertion | does the input reach the condition the test is named after? | the second gamut fixture crossed the boundary **zero** times |
+| the comparison | the non-vacuity count | did the effect move anything in the two things being compared? | microcontrast moving **0 of 2304** samples in the two-resolution test |
+
+**The idea: assert that the thing being measured is present, before trusting
+what the measurement says.**
+
+The three do not imply one another, and that is why three are needed. "Present"
+means something different at each level — the test executes, the input reaches
+the region, the effect acts on it — and each of the three failures above passed
+the other two guards. The census spec's fixture was fine and its effect was
+live. The gamut fixture ran, and it was not vacuous, it was merely pointing at
+the wrong place. The microcontrast case ran, and its fixture was correct for the
+test it was copied from.
+
+Two things follow:
+
+- **Each guard is a count, not a belief.** "The ramp crosses the boundary" and
+  "0 crossings" are the same claim with and without evidence. The occupancy rule
+  above makes this same demand of a *population* — which is why the two sections
+  read alike. Same idea, aimed at two different things: whether a measurement
+  covers what it claims, and whether it happened at all.
+- **Green is the weakest evidence here.** All three failures were green, and in
+  each one a document nearby described the check in the present tense while it
+  did nothing.
+
+When a fourth level turns up, add it to the table rather than starting a section
+of its own. The value is in the list being in one place.
+
 ## A duplicated guard does not inherit the original's fixes
 
 The trademark check existed in `presets.test.ts`, word-bounded, carrying a
