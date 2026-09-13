@@ -169,13 +169,34 @@ describe('the run', () => {
     expect(stampWidth()).toBeCloseTo(digitOrigins()[DATE_DIGIT_COUNT - 1]! + DIGIT_WIDTH, 12)
   })
 
-  it('fits inside a frame at the default position', () => {
-    // The position anchors the RIGHT end of the run, so the left end is the one
-    // that can fall off. In frame units on the long edge:
-    const width = stampWidth() * DATE_STAMP_HEIGHT
-    const left = DEFAULT_EDIT_STATE.dateStampPosition[0]! - width
-    expect(left, 'the run starts off the left edge at the default position').toBeGreaterThan(0)
+  it('fits inside a frame at the default position, in either orientation', () => {
+    /*
+     * The position anchors the RIGHT end of the run, so the left end is the one
+     * that can fall off.
+     *
+     * The aspect ratio has to be carried through, and getting it wrong makes
+     * this read stronger than it is. The cap height is a fraction of the LONG
+     * edge, so on a portrait frame the run is the same absolute width while the
+     * frame is narrower — the fraction of the width it occupies is larger by the
+     * aspect ratio. Comparing a long-edge fraction against a position in width
+     * units is correct for landscape and silent about portrait, which is the
+     * case that can actually fail.
+     */
+    const widthFraction = (w: number, h: number): number =>
+      (stampWidth() * DATE_STAMP_HEIGHT * Math.max(w, h)) / w
+    for (const [w, h] of [
+      [3, 2],
+      [2, 3],
+      [1, 1],
+      // A panorama and a tall crop, well past anything a camera produces.
+      [3, 1],
+      [1, 3],
+    ] as const) {
+      const left = DEFAULT_EDIT_STATE.dateStampPosition[0]! - widthFraction(w, h)
+      expect(left, `the run starts off the left edge on a ${w}:${h} frame`).toBeGreaterThan(0)
+    }
     expect(DEFAULT_EDIT_STATE.dateStampPosition[0]).toBeLessThanOrEqual(1)
+    expect(DEFAULT_EDIT_STATE.dateStampPosition[1]).toBeLessThanOrEqual(1)
   })
 })
 

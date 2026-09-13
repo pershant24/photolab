@@ -2252,6 +2252,7 @@ three examples than from a statement.
 | the suite | the test-count rule | did this test run at all? | a census spec reading its inputs from a session-named scratch path, which would have skipped on every machine forever |
 | the fixture | the zero-crossing assertion | does the input reach the condition the test is named after? | the second gamut fixture crossed the boundary **zero** times |
 | the comparison | the non-vacuity count | did the effect move anything in the two things being compared? | microcontrast moving **0 of 2304** samples in the two-resolution test |
+| the library the guard draws from | a fixture built for the question | do the inputs the guard reads exercise the thing it is guarding? | the axis-residue test, when the date stamp's parameters joined the camera axis and no shipping preset set any of them |
 
 **The idea: assert that the thing being measured is present, before trusting
 what the measurement says.**
@@ -2275,8 +2276,25 @@ Two things follow:
   each one a document nearby described the check in the present tense while it
   did nothing.
 
-When a fourth level turns up, add it to the table rather than starting a section
-of its own. The value is in the list being in one place.
+The fourth row arrived in the same session that wrote the first three, which is
+the best argument for the table there is.
+
+`applyAxisPreset` resets an axis before applying a preset, and
+`tests/unit/axes.test.ts` guards it — that guard exists because merging left a
+plastic lens's diffusion on a corrected medium format. Adding
+`dateStampStrength`, `dateStampPosition` and `dateStampTint` to the camera axis
+put three parameters under that guard that **no preset in the library sets**, so
+every assertion about them was reset-a-default-to-the-default. Green, and
+watching nothing. The fix is two synthetic presets built for the question rather
+than borrowed from the shipping library, and it also made the date's placement on
+the photograph checkable, which nothing had been asserting either.
+
+The level is genuinely new. The test ran, its inputs were real, and the effect it
+measured was live — it is the **library the inputs were drawn from** that failed
+to contain the case. Which is why the list is worth keeping in one place: the
+next one will not look like any of these four either.
+
+When a fifth turns up, add it here.
 
 ## The date stamp, and an asset class that turned out not to be needed
 

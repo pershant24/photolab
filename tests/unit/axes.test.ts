@@ -377,6 +377,73 @@ describe('switching between presets on the same axis', () => {
     }
   })
 
+  it('resets a date back that a camera fitted, and never the date itself', () => {
+    /*
+     * The stamp's parameters are split across the line the axes are drawn on,
+     * and this is the assertion that the split behaves as it is argued to.
+     *
+     * Synthetic presets rather than shipping ones, deliberately. No camera in
+     * the library fits a date back today, so every assertion here would be
+     * reset-a-default-to-the-default and would pass while observing nothing —
+     * the `diffusionStrength: 0.15` bug's own guard, gone vacuous one parameter
+     * set later. Two presets built for the purpose is what makes the question
+     * real, and it stays real when the library changes underneath it.
+     *
+     * What must happen when a camera without a date back replaces one with:
+     *
+     *   the stamp turns off          it is a camera fitting, so the axis owns it
+     *   the printing returns         same
+     *   THE DATE IS UNTOUCHED        it is a fact about the afternoon
+     *
+     * That last line is the divergence recorded in `src/core/state/axes.ts`.
+     * Placing the date on the camera axis was the obvious thing and would have
+     * meant a user setting the day their photograph was taken, trying a
+     * different lens, and losing it with nothing to say so.
+     */
+    const withDateBack: AxisPreset = {
+      id: 'test-camera-date-back',
+      name: 'Compact with a date back',
+      axis: 'camera',
+      patch: { dateStampStrength: 4, dateStampTint: [1, 0.5, 0.3], vignette: 0.3 },
+    }
+    const without: AxisPreset = {
+      id: 'test-camera-plain',
+      name: 'Camera with no date back',
+      axis: 'camera',
+      // Holds no opinion on the stamp, which is the whole difficulty: a sparse
+      // patch cannot say "explicitly off", so a merge would leave it on.
+      patch: { vignette: 0.1 },
+    }
+
+    // The photograph, with a date the person editing it set themselves.
+    const shot = mergeEditState(DEFAULT_EDIT_STATE, {
+      dateStampYear: 1996,
+      dateStampMonth: 7,
+      dateStampDay: 4,
+    })
+
+    const fitted = applyAxisPreset(shot, withDateBack)
+    // Non-vacuity, before anything is concluded from the switch: the first
+    // preset has to actually have turned the stamp on.
+    expect(fitted.dateStampStrength, 'the date back preset did not fit one').toBe(4)
+    expect(fitted.dateStampTint).toEqual([1, 0.5, 0.3])
+
+    const after = applyAxisPreset(fitted, without)
+
+    expect(after.dateStampStrength, 'a camera with no date back still stamps').toBe(
+      DEFAULT_EDIT_STATE.dateStampStrength,
+    )
+    expect(after.dateStampTint, 'the previous stamp colour survived the switch').toEqual(
+      DEFAULT_EDIT_STATE.dateStampTint,
+    )
+    expect(after.vignette).toBe(0.1)
+
+    // And the date is the photograph's, so neither preset may touch it.
+    expect(after.dateStampYear, 'switching camera reset the year').toBe(1996)
+    expect(after.dateStampMonth, 'switching camera reset the month').toBe(7)
+    expect(after.dateStampDay, 'switching camera reset the day').toBe(4)
+  })
+
   it('leaves the photograph alone: exposure and white balance survive any switch', () => {
     // The argument `presets.ts` makes for sparse patches. Resetting an axis must
     // not reach parameters that are on no axis.
