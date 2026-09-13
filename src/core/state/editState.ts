@@ -138,6 +138,22 @@ export interface EditState {
   /** Stray light through a seam in the body. A camera parameter, in the film stage. */
   readonly lightLeakStrength: number
   readonly lightLeakPosition: number
+
+  /**
+   * The date back: LEDs exposing the emulsion, in the film stage and on the
+   * camera axis, like the leak and for the same reason.
+   *
+   * The three date components are deliberately NOT on the camera axis. See
+   * `src/core/state/axes.ts` — the camera owns whether there is a date back and
+   * what it looks like; what day it was is a fact about the photograph.
+   */
+  readonly dateStampStrength: number
+  readonly dateStampPosition: readonly number[]
+  readonly dateStampTint: readonly number[]
+  readonly dateStampYear: number
+  readonly dateStampMonth: number
+  readonly dateStampDay: number
+
   readonly vignette: number
 
   /** How much scattered light to add back. 0 is off. */
@@ -413,6 +429,58 @@ const SCALARS: readonly ScalarParameter[] = [
   },
   {
     kind: 'scalar',
+    key: 'dateStampStrength',
+    label: 'Date stamp',
+    // Radiance of the LEDs, in linear working-space units, and the range is set
+    // by halation rather than by taste. The threshold is in stops from middle
+    // grey, so the shipping stocks scatter above 0.83 and 0.49 linear; with the
+    // default tint's luminance weight of 0.494 that puts full bleed at a
+    // strength of 2.4 and 1.4. A range topping out below that would make the
+    // stamp incapable of the one thing it is for.
+    min: 0,
+    max: 8,
+    step: 0.05,
+    defaultValue: 0,
+    unit: '',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
+    key: 'dateStampYear',
+    label: 'Year',
+    // A fact about the photograph, not about the camera. Only the last two
+    // digits are shown, which is what the hardware did.
+    min: 1900,
+    max: 2099,
+    step: 1,
+    defaultValue: 2000,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'dateStampMonth',
+    label: 'Month',
+    min: 1,
+    max: 12,
+    step: 1,
+    defaultValue: 1,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'dateStampDay',
+    label: 'Day',
+    // Not validated against the month. A date back did not validate either — it
+    // had a dumb counter and would happily print the 31st of February if you set
+    // it there — and a renderer is the wrong place to start refusing dates.
+    min: 1,
+    max: 31,
+    step: 1,
+    defaultValue: 1,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
     key: 'vignette',
     label: 'Vignette',
     min: 0,
@@ -576,6 +644,16 @@ export const DEFAULT_EDIT_STATE: EditState = {
   microcontrastRadius: 0.004,
   lightLeakStrength: 0,
   lightLeakPosition: 0.12,
+  dateStampStrength: 0,
+  // Bottom right, where a date back prints. The anchor is the run's right end.
+  dateStampPosition: [0.955, 0.93],
+  // An orange-red LED. Fixed literals throughout: nothing here may read a clock,
+  // or the same EditState would render differently on two days and the renderer
+  // would stop being a function of its arguments.
+  dateStampTint: [1, 0.32, 0.12],
+  dateStampYear: 2000,
+  dateStampMonth: 1,
+  dateStampDay: 1,
   vignette: 0,
   halationStrength: 0,
   halationThreshold: 2,
@@ -672,6 +750,39 @@ const VECTORS: readonly VectorParameter[] = [
     step: 0.001,
     defaultValue: [0, 0, 0],
     identityValue: [0, 0, 0],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'dateStampPosition',
+    label: 'Stamp position',
+    length: 2,
+    // Frame units, and the anchor is the run's RIGHT end at the vertical centre
+    // of the cap height. Right-anchored because a date back prints into a corner
+    // and the run grows away from it; a left anchor would push the stamp off the
+    // frame at exactly the positions anyone would choose.
+    min: 0,
+    max: 1,
+    step: 0.005,
+    defaultValue: [0.955, 0.93],
+    // The identity of a vector parameter is the value at which it contributes
+    // nothing, and position has no such value — the pass's identity is a
+    // strength of zero, which is a different parameter. The default stands in,
+    // because at the default the stamp is off and the position is unobservable.
+    identityValue: [0.955, 0.93],
+    components: ['X', 'Y'],
+  },
+  {
+    kind: 'vector',
+    key: 'dateStampTint',
+    label: 'Stamp colour',
+    length: 3,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: [1, 0.32, 0.12],
+    // As above: the colour has no identity, the strength does.
+    identityValue: [1, 0.32, 0.12],
     components: ['Red', 'Green', 'Blue'],
   },
   {

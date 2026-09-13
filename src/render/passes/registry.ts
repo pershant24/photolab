@@ -19,6 +19,7 @@ import { contrastPass } from './contrast'
 import { displayPass } from './display'
 import { exposurePass } from './exposure'
 import { grainPass } from './grain'
+import { dateStampPass } from './dateStamp'
 import { lightLeakPass } from './lightLeak'
 import { HALATION_PASSES } from './halation'
 import { hslPass } from './hsl'
@@ -73,6 +74,12 @@ export function registeredPasses(curvePass: Pass, filmCurvesPass: Pass): readonl
     // before anything the emulsion does to it, so halation blooms it and the
     // characteristic curves develop it as exposure.
     lightLeakPass,
+    // Beside the leak, and before halation and the curves for the same reason:
+    // the LEDs are light reaching the emulsion, not a caption drawn afterwards.
+    // Commutative with the leak — both add to their own texel and neither reads
+    // a neighbour — so the order between the two is a preference, not a
+    // requirement. Position asserted in tests/unit/pass-positions.test.ts.
+    dateStampPass,
     ...HALATION_PASSES,
     filmCurvesPass,
     // Grain last inside the film stage, and registration order is what decides

@@ -67,6 +67,16 @@ stocks. Measured, at a vignette of 0.7: a corner-to-centre ratio of 0.52 through
 the contrastiest stock, 0.59 and 0.66 through the two flatter ones — a 15% spread
 from a control that never touched them.
 
+The **date stamp** is the clearest case. It is a row of LEDs inside the camera
+back, so it is scene light: it injects *before* the emulsion and gets halation
+and the characteristic curves for free. Nothing about the bleed around it is
+drawn. Switch halation off and the same digits come out flat and hard-edged, and
+look immediately like type composited onto a photograph; switch it on and they
+bloom the way a small very bright source does on film. Measured, on unlit pixels
+next to the stamp: **79% of them are raised by halation, and 0% when the stamp is
+moved downstream of it** — which is the assertion the whole arrangement rests on,
+and the one that catches a refactor quietly turning it back into a caption.
+
 **Everything spatial is measured against the source, not the buffer.** A blur
 radius in pixels is a different size on a 2048px preview than on a 6000px export,
 so the preview would lie about the result. Getting this wrong is invisible at
