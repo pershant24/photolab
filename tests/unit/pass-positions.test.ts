@@ -83,6 +83,27 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
     'halationThreshold',
     'stray light reflects off the film base like any other light',
   ],
+  // The date stamp is in the same position and there for the same reason: LEDs
+  // in the camera back expose the emulsion, so the stamp must reach it before
+  // the emulsion does anything. THIS IS THE ASSERTION THE WHOLE DESIGN RESTS ON
+  // — moving the stamp after the curves would make it a caption drawn on a
+  // photograph rather than light recorded in one, and the picture would look
+  // subtly wrong in a way nothing else here would catch.
+  [
+    'vignette',
+    'dateStamp',
+    'the stamp is inside the body, so the lens never touched it — but it is still light on film',
+  ],
+  [
+    'dateStamp',
+    'halationThreshold',
+    'a small very bright source is exactly what scatters off the film base',
+  ],
+  [
+    'dateStamp',
+    'filmCurves',
+    'the LEDs are exposure; the curves turn exposure into density',
+  ],
 
   // Film, internally. Halation adds light to the emulsion, so it happens before
   // the curves turn exposure into density; grain depends on the density those

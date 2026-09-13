@@ -79,7 +79,7 @@ const SETUP = `async (source) => {
 
 const OFF = {
   distortion: 0, aberration: 0, diffusionStrength: 0, vignette: 0, microcontrast: 0,
-  lightLeakStrength: 0,
+  lightLeakStrength: 0, dateStampStrength: 0,
   halationStrength: 0, grainStrength: 0, filmStrength: 0, exposure: 0, contrast: 1,
 }
 
@@ -97,12 +97,64 @@ const CASES = {
   // dependency the vignette has and the same one every export tile breaks if it
   // is read from the buffer instead.
   lightLeak: { ...OFF, lightLeakStrength: 0.8, lightLeakPosition: 0.12 },
+  // The date stamp, for the same reason and with one extra property worth
+  // having: at the default position its run spans source x 390 to 458, so it
+  // STRADDLES the vertical seam at 400. A frame-positioned element that landed
+  // wholly inside one tile would satisfy every assertion below while testing
+  // nothing about the boundary, which is the case E1.5 warns about and the
+  // reason the position is left at its default here rather than chosen.
+  //
+  // 88 88 88 lights forty-two segments against the default date's twenty-eight,
+  // which is what makes the moved-pixel count below worth counting.
+  dateStamp: {
+    ...OFF,
+    dateStampStrength: 4,
+    dateStampYear: 1988,
+    dateStampMonth: 8,
+    dateStampDay: 8,
+  },
   everything: {
     ...OFF, distortion: -0.12, aberration: 0.005,
     diffusionStrength: 0.5, diffusionRadius: 0.015, vignette: 0.6,
     microcontrast: 0.6, microcontrastRadius: 0.008,
   },
 } as const
+
+/**
+ * How many pixels each effect is expected to move, as a range.
+ *
+ * A range and not a floor, because of the date stamp. Every other effect here is
+ * global — it acts on most of the frame, so any number in the tens of thousands
+ * is evidence it ran and a bound above would never bind. The stamp is a small
+ * element of fixed size relative to the frame, so its count is set by its own
+ * area and nothing else, and it is **two orders of magnitude smaller**. A single
+ * shared floor of 1000 would have failed it, and raising the stamp's floor to
+ * fit while leaving it a floor throws away the more useful half.
+ *
+ * The upper bound is the useful half. A stamp that covered the frame would be a
+ * scale error — cap height read against the buffer instead of the image, which
+ * is the mistake `docs/SHADER_CONVENTIONS.md` §2 is about — and it would sail
+ * through a floor while failing this.
+ */
+const DEFAULT_MOVED_BOUNDS: readonly [number, number] = [1000, Number.POSITIVE_INFINITY]
+
+const MOVED_BOUNDS: Readonly<Record<string, readonly [number, number]>> = {
+  /*
+   * Derived from the geometry, then confirmed against the measurement.
+   *
+   * At 480x360 the cap height is 0.028 of the long edge, so 13.4 source pixels,
+   * and the run is 5.06 cap heights wide: 68 by 13 pixels of bounding box. The
+   * lit area of `88 88 88` is eighteen horizontal segments at 0.041 square cap
+   * heights and twenty-four verticals at 0.023, which is 1.29 square cap heights
+   * — about 232 pixels, plus an antialiased fringe of roughly one pixel around a
+   * perimeter of some 900, so 300 to 500 is the range to expect.
+   *
+   * The bounds are set wide of that on both sides rather than tight to the
+   * measurement: this is a presence check, not a pixel count, and it has to
+   * survive a tracking change without being retuned.
+   */
+  dateStamp: [120, 4000],
+}
 
 test.describe('the lens stage under tiling', () => {
   test.beforeEach(async ({ page }) => {
@@ -264,7 +316,7 @@ test.describe('the lens stage under tiling', () => {
     })
   }
 
-  test('the light leak is a pure function of the edit, with no seed of its own', async ({
+  test('the leak and the stamp are pure functions of the edit, with no seed of their own', async ({
     page,
   }) => {
     // Cheap insurance rather than a response to a bug. The pass has no time
@@ -272,6 +324,12 @@ test.describe('the lens stage under tiling', () => {
     // adding one to make a leak "feel alive" without noticing that it breaks
     // preview-export agreement and every golden comparison at once. Grain has
     // the same assertion for the same reason.
+    //
+    // The stamp is run in the same frame, and it has a second way to go wrong
+    // that the leak does not: a default date read from the system clock. That
+    // would not fail here — both renders happen on the same day — so
+    // tests/unit/date-stamp.test.ts asserts the literals directly. This covers
+    // the per-render half.
     const twice = await page.evaluate<
       { a: number[]; b: number[] },
       { edit: Record<string, number>; source: { width: number; height: number } }
@@ -304,10 +362,10 @@ test.describe('the lens stage under tiling', () => {
         return out
       }
       return { a: once(), b: once() }
-    }, { edit: CASES.lightLeak, source: SOURCE })
+    }, { edit: { ...CASES.lightLeak, ...CASES.dateStamp, lightLeakStrength: 0.8 }, source: SOURCE })
 
     expect(twice.a.length).toBeGreaterThan(50)
-    expect(twice.a, 'the same state rendered twice gave two different leaks').toEqual(twice.b)
+    expect(twice.a, 'the same state rendered twice gave two different frames').toEqual(twice.b)
   })
 
   test('declares an overlap large enough, and starving it shows', async ({ page }) => {
@@ -425,7 +483,9 @@ test.describe('the lens stage under tiling', () => {
       for (let i = 0; i < before.length; i += 4) {
         if (before[i] !== after[i] || before[i + 1] !== after[i + 1]) moved++
       }
-      expect(moved, `${name} left the frame unchanged`).toBeGreaterThan(1000)
+      const [min, max] = MOVED_BOUNDS[name] ?? DEFAULT_MOVED_BOUNDS
+      expect(moved, `${name} moved ${moved} pixels, which is below ${min}`).toBeGreaterThan(min)
+      expect(moved, `${name} moved ${moved} pixels, which is above ${max}`).toBeLessThan(max)
     }
   })
 })

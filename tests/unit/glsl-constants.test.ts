@@ -19,6 +19,14 @@ import {
   SRGB_LINEAR_BREAK,
   SRGB_SLOPE,
 } from '../../src/core/colour/transfer'
+import {
+  DATE_STAMP_HEIGHT,
+  DATE_STAMP_SLANT,
+  DIGIT_SEGMENTS,
+  SEGMENT_BOXES,
+  TICK_CENTRE,
+  TICK_HALF,
+} from '../../src/core/colour/dateStamp'
 import type { Mat3 } from '../../src/core/colour/types'
 
 /**
@@ -35,10 +43,11 @@ import type { Mat3 } from '../../src/core/colour/types'
  * patch and a channel rather than a constant. This names the constant.
  */
 
-const SOURCE = readFileSync(
-  fileURLToPath(new URL('../../src/render/shaders/lib/colour.glsl', import.meta.url)),
-  'utf8',
-)
+const read = (name: string): string =>
+  readFileSync(fileURLToPath(new URL(`../../src/render/shaders/lib/${name}`, import.meta.url)), 'utf8')
+
+const SOURCE = read('colour.glsl')
+const DATE_STAMP_SOURCE = read('dateStamp.glsl')
 
 function glslFloat(name: string): number {
   const match = new RegExp(`const\\s+float\\s+${name}\\s*=\\s*(-?[0-9.eE+-]+)\\s*;`).exec(SOURCE)
@@ -105,5 +114,88 @@ describe('shader constants match their TypeScript source', () => {
         ).toBeCloseTo(expected[row * 3 + column] ?? Number.NaN, 9)
       }
     }
+  })
+})
+
+/**
+ * The glyph geometry, checked the same way and for a slightly different reason.
+ *
+ * These are not values GLSL cannot compute — most of them it could. They are
+ * transcribed because the shader needs them as compile-time constants in an
+ * array initialiser, and `SEGMENT_BOXES` in particular is derived arithmetic
+ * written out as forty-two literals.
+ *
+ * A wrong one there does not produce a wrong colour or a failed agreement test.
+ * It produces a digit with a segment in the wrong place, which every test in the
+ * suite passes happily and only a person looking at the picture would catch.
+ * That is the worst kind of defect to leave to review, so it is checked.
+ */
+describe('the seven-segment geometry matches its TypeScript source', () => {
+  const floatIn = (source: string, name: string): number => {
+    const match = new RegExp(`const\\s+float\\s+${name}\\s*=\\s*(-?[0-9.eE+-]+)\\s*;`).exec(source)
+    if (!match?.[1]) throw new Error(`dateStamp.glsl has no "const float ${name}"`)
+    return Number(match[1])
+  }
+
+  const vecIn = (source: string, name: string): number[] => {
+    const match = new RegExp(`const\\s+vec2\\s+${name}\\s*=\\s*vec2\\(([^)]*)\\)`).exec(source)
+    if (!match?.[1]) throw new Error(`dateStamp.glsl has no "const vec2 ${name}"`)
+    return match[1].split(',').map((part) => Number(part.trim()))
+  }
+
+  it.each([
+    ['DATE_STAMP_HEIGHT', DATE_STAMP_HEIGHT],
+    ['DATE_STAMP_SLANT', DATE_STAMP_SLANT],
+  ])('%s', (name, expected) => {
+    expect(floatIn(DATE_STAMP_SOURCE, name)).toBe(expected)
+  })
+
+  it.each([
+    ['TICK_CENTRE', TICK_CENTRE],
+    ['TICK_HALF', TICK_HALF],
+  ])('%s', (name, expected: readonly [number, number]) => {
+    expect(vecIn(DATE_STAMP_SOURCE, name)).toEqual([...expected])
+  })
+
+  it('every segment box, in order', () => {
+    const body = /const\s+vec4\s+SEGMENT_BOXES\[7\]\s*=\s*vec4\[7\]\(([\s\S]*?)\n\);/.exec(
+      DATE_STAMP_SOURCE,
+    )
+    expect(body?.[1], 'dateStamp.glsl has no SEGMENT_BOXES initialiser').toBeTruthy()
+    const boxes = [...body![1]!.matchAll(/vec4\(([^)]*)\)/g)].map((m) =>
+      m[1]!.split(',').map((part) => Number(part.trim())),
+    )
+    expect(boxes, 'seven segments, a through g').toHaveLength(7)
+    for (let i = 0; i < 7; i++) {
+      // Close, not exact, and this is the same case the computed constants above
+      // are in rather than a relaxation. The TypeScript derives these — the top
+      // bar's half-width is `(0.6 - 0.15) / 2 - 0.024`, which in binary is
+      // 0.20099999999999998 — while the shader carries the short decimal anyone
+      // would write. Demanding exact equality would fail on the representation
+      // and not on any transcription. It is also moot at the far end: a GLSL
+      // float is 32-bit, so neither value survives to the ninth place anyway.
+      //
+      // 1e-9 is still four orders tighter than the smallest mistake that could
+      // be made here, which is a digit in the third place.
+      for (let c = 0; c < 4; c++) {
+        expect(boxes[i]![c], `segment ${'abcdefg'[i]} component ${c}`).toBeCloseTo(
+          SEGMENT_BOXES[i]![c]!,
+          9,
+        )
+      }
+    }
+  })
+
+  it('every digit mask, in order', () => {
+    const body = /const\s+int\s+DIGIT_SEGMENTS\[10\]\s*=\s*int\[10\]\(([\s\S]*?)\n\);/.exec(
+      DATE_STAMP_SOURCE,
+    )
+    expect(body?.[1], 'dateStamp.glsl has no DIGIT_SEGMENTS initialiser').toBeTruthy()
+    const masks = body![1]!
+      .split(',')
+      .map((part) => part.replace(/\/\/.*$/gm, '').trim())
+      .filter((part) => part.length > 0)
+      .map(Number)
+    expect(masks).toEqual([...DIGIT_SEGMENTS])
   })
 })

@@ -72,6 +72,11 @@ export const AXIS_PARAMETERS: Record<PresetAxis, readonly string[]> = {
     // why this table is written against parameters rather than stages.
     'lightLeakStrength',
     'lightLeakPosition',
+    // Whether there is a date back, and what its printing looks like. NOT what
+    // day it was — see PHOTOGRAPH_PARAMETERS, and the note there.
+    'dateStampStrength',
+    'dateStampPosition',
+    'dateStampTint',
     'vignette',
     'grainSize',
   ],
@@ -110,7 +115,31 @@ export const AXIS_PARAMETERS: Record<PresetAxis, readonly string[]> = {
  * layer is explicitly the exception, and a user saving their own tweak of their
  * own photograph is entitled to include the exposure they chose.
  */
-export const PHOTOGRAPH_PARAMETERS: readonly string[] = ['exposure', 'temperature', 'tint']
+export const PHOTOGRAPH_PARAMETERS: readonly string[] = [
+  'exposure',
+  'temperature',
+  'tint',
+  /*
+   * The date, which is the same split as grainSize against grainStrength one
+   * step further out, and it was nearly got wrong.
+   *
+   * The obvious placement is the camera axis, with the rest of the stamp. It
+   * produces a specific bug, and it is the inverse of the one `applyAxisPreset`
+   * was written to fix: a user sets the day their photograph was taken, switches
+   * camera preset to try a different lens, and `axisResetPatch` silently returns
+   * the date to 1 January 2000. Nothing in the interface would say so, and the
+   * export would carry the wrong date.
+   *
+   * The coherent line is the physical one. A date back is a thing bolted into a
+   * camera body, so whether one is fitted and what its printing looks like are
+   * facts about the camera. What day it was is a fact about the afternoon. A
+   * camera preset can switch the stamp on without claiming to know when the
+   * photograph was taken, which is exactly what a date back does.
+   */
+  'dateStampYear',
+  'dateStampMonth',
+  'dateStampDay',
+]
 
 /** The axis owning a parameter, or `null` for the photograph's own. */
 export function axisOf(key: string): PresetAxis | null {

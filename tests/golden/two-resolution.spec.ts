@@ -102,6 +102,36 @@ const CASES: Record<
    * today's code, so it is now asserted rather than assumed —
    * `tests/unit/blur-sharing.test.ts`.
    */
+  /*
+   * The date stamp is deliberately absent too, and for a different reason from
+   * microcontrast's — one worth writing down, because a case here would not
+   * merely be weak. It would point the wrong way.
+   *
+   * The stamp's geometry contains no buffer-derived quantity at all. Its cap
+   * height is a fraction of `uImageSize` and its position is a frame
+   * coordinate, so there is no scale factor to drop; the mutation this file
+   * exists to catch — dividing by the buffer — is caught by `lens.spec.ts`
+   * instead, because an export tile has a different resolution from the whole
+   * frame even when both render at the same scale. Measured: 3.08e-1 against a
+   * tolerance of 1.7e-2.
+   *
+   * The one scale-dependent term is the antialiasing, and it is scale-dependent
+   * ON PURPOSE. `fwidth` makes the glyph edge one BUFFER pixel wide at every
+   * resolution, which is what keeps the stamp crisp on a 6000-pixel export and
+   * on a 2048-pixel proxy alike. Two resolutions therefore disagree in a band
+   * along every edge **when the shader is correct**.
+   *
+   * Replace `fwidth(d)` with a constant in cap heights — a real mistake, and the
+   * one a case here would be written to catch — and the edge becomes a fixed
+   * fraction of the FRAME, so the two resolutions agree more closely than they
+   * do now. A two-resolution case would pass more comfortably with the bug than
+   * without it. That is the gamut fixture's failure again: a fixture that argues
+   * for the defect, and there is a section on it in tests/README.md.
+   *
+   * Unverified, and flagged as such: the direction of the argument is followed
+   * from what the two formulations do rather than measured, because measuring it
+   * means building the misleading case in order to watch it mislead.
+   */
   halation: {
     off: { halationStrength: 0 },
     // Halation only acts above its threshold, so it reaches a small part of the

@@ -88,6 +88,7 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     // the emulsion does anything — so halation blooms it and the curves develop
     // it as exposure.
     'lightLeak',
+    'dateStamp',
     'halationThreshold',
     'halationBlurH',
     'halationBlurV',
@@ -108,9 +109,11 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'display',
   ])
 
-  // Three of the twenty-three passes run at the default edit: imageSource is
+  // Three of the twenty-four passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
+  // The light leak and the date stamp are both off at a strength of zero, which
+  // is what keeps an unedited photograph free of either.
   //
   // The four halation passes appear here in physical order — threshold, blur
   // across, blur down, composite — and before the characteristic curves, since
