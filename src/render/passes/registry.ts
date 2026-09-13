@@ -18,6 +18,7 @@ import type { Pass } from './types'
 import { contrastPass } from './contrast'
 import { displayPass } from './display'
 import { exposurePass } from './exposure'
+import { graduatedPass } from './graduated'
 import { grainPass } from './grain'
 import { dateStampPass } from './dateStamp'
 import { lightLeakPass } from './lightLeak'
@@ -60,6 +61,11 @@ export function registeredPasses(curvePass: Pass, filmCurvesPass: Pass): readonl
     // Shaping tone and then trimming colour is also the order people work in.
     curvePass,
     contrastPass,
+    // The graduated filter after contrast and before the colour trims. Run it
+    // before contrast and a slope of 1.6 would turn a one-stop grad into 1.6
+    // stops, which is the interaction that moved contrast next to the tone
+    // curve in the first place. See passes/graduated.ts.
+    graduatedPass,
     wheelsPass,
     hslPass,
     splitTonePass,

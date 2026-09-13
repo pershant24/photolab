@@ -120,6 +120,18 @@ const CONSTRAINTS: readonly (readonly [string, string, string])[] = [
   // Grade, internally: tonal shaping first, colour trim after. This is the one
   // that was wrong, and the reason the file exists.
   ['toneCurve', 'contrast', 'the two tonal controls are adjacent'],
+  // The graduated filter is a local exposure decision, so it belongs with the
+  // tonal shaping and after the control that would otherwise scale it.
+  [
+    'contrast',
+    'graduated',
+    'a grad before contrast would be scaled by it — one stop becomes 1.6 at contrast 1.6',
+  ],
+  [
+    'graduated',
+    'wheels',
+    'tonal shaping first, colour trim after, which is the order this stage is already built in',
+  ],
   ['contrast', 'wheels', 'contrast last scaled every wheel in proportion to its slope'],
   ['contrast', 'splitTone', 'and every split tone offset with it'],
   ['wheels', 'hsl', 'zone trim, then hue trim'],

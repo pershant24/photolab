@@ -444,6 +444,51 @@ describe('switching between presets on the same axis', () => {
     expect(after.dateStampDay, 'switching camera reset the day').toBe(4)
   })
 
+  it('resets a graduated filter that a grade set, on the grade axis', () => {
+    /*
+     * The same hole as the date back's, one axis over, and it reappeared for
+     * exactly the same reason: five parameters joined the grade axis and no
+     * shipping grade preset sets any of them, so the residue guard would have
+     * been resetting defaults to defaults and watching nothing.
+     *
+     * `tests/README.md` records this as the fourth level of the vacuity pattern
+     * — the LIBRARY the guard draws its inputs from failing to contain the case,
+     * while the test runs and its effect is live. The second instance arriving
+     * within one session of the first is the argument for the synthetic-preset
+     * habit rather than for noticing each time.
+     */
+    const withGrad: AxisPreset = {
+      id: 'test-grade-grad',
+      name: 'Grade with a graduated filter',
+      axis: 'grade',
+      patch: { graduatedExposure: -1.5, graduatedAngle: 90, contrast: 1.2 },
+    }
+    const without: AxisPreset = {
+      id: 'test-grade-plain',
+      name: 'Grade with no filter',
+      axis: 'grade',
+      // Silent on the filter, which is the difficulty: a sparse patch cannot
+      // say "explicitly none", so a merge would leave the grad in place.
+      patch: { contrast: 0.9 },
+    }
+
+    const filtered = applyAxisPreset(DEFAULT_EDIT_STATE, withGrad)
+    // Non-vacuity before the switch is read: the first preset has to have put a
+    // filter there to remove.
+    expect(filtered.graduatedExposure, 'the grad preset set no filter').toBe(-1.5)
+    expect(filtered.graduatedAngle).toBe(90)
+
+    const after = applyAxisPreset(filtered, without)
+
+    expect(after.graduatedExposure, 'the previous grade filter survived the switch').toBe(
+      DEFAULT_EDIT_STATE.graduatedExposure,
+    )
+    expect(after.graduatedAngle, 'the previous grad angle survived the switch').toBe(
+      DEFAULT_EDIT_STATE.graduatedAngle,
+    )
+    expect(after.contrast).toBe(0.9)
+  })
+
   it('leaves the photograph alone: exposure and white balance survive any switch', () => {
     // The argument `presets.ts` makes for sparse patches. Resetting an axis must
     // not reach parameters that are on no axis.

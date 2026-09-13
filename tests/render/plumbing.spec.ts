@@ -103,13 +103,16 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     // slope. See renderer.ts.
     'toneCurve',
     'contrast',
+    // The grad sits between the tonal shaping and the colour trims: after
+    // contrast, which would otherwise scale it, and before the wheels.
+    'graduated',
     'wheels',
     'hsl',
     'splitTone',
     'display',
   ])
 
-  // Three of the twenty-four passes run at the default edit: imageSource is
+  // Three of the twenty-five passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
   // The light leak and the date stamp are both off at a strength of zero, which
