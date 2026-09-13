@@ -2252,6 +2252,7 @@ three examples than from a statement.
 | the suite | the test-count rule | did this test run at all? | a census spec reading its inputs from a session-named scratch path, which would have skipped on every machine forever |
 | the fixture | the zero-crossing assertion | does the input reach the condition the test is named after? | the second gamut fixture crossed the boundary **zero** times |
 | the comparison | the non-vacuity count | did the effect move anything in the two things being compared? | microcontrast moving **0 of 2304** samples in the two-resolution test |
+| the library the guard draws from | a fixture built for the question | do the inputs the guard reads exercise the thing it is guarding? | the axis-residue test, when the date stamp's parameters joined the camera axis and no shipping preset set any of them |
 
 **The idea: assert that the thing being measured is present, before trusting
 what the measurement says.**
@@ -2275,8 +2276,185 @@ Two things follow:
   each one a document nearby described the check in the present tense while it
   did nothing.
 
-When a fourth level turns up, add it to the table rather than starting a section
-of its own. The value is in the list being in one place.
+The fourth row arrived in the same session that wrote the first three, which is
+the best argument for the table there is.
+
+`applyAxisPreset` resets an axis before applying a preset, and
+`tests/unit/axes.test.ts` guards it — that guard exists because merging left a
+plastic lens's diffusion on a corrected medium format. Adding
+`dateStampStrength`, `dateStampPosition` and `dateStampTint` to the camera axis
+put three parameters under that guard that **no preset in the library sets**, so
+every assertion about them was reset-a-default-to-the-default. Green, and
+watching nothing. The fix is two synthetic presets built for the question rather
+than borrowed from the shipping library, and it also made the date's placement on
+the photograph checkable, which nothing had been asserting either.
+
+The level is genuinely new. The test ran, its inputs were real, and the effect it
+measured was live — it is the **library the inputs were drawn from** that failed
+to contain the case. Which is why the list is worth keeping in one place: the
+next one will not look like any of these four either.
+
+When a fifth turns up, add it here.
+
+## The date stamp, and an asset class that turned out not to be needed
+
+### The design rests on one line in a list, so the consequence is measured
+
+The stamp injects into the film stage before halation and before the
+characteristic curves. That is the whole of it: it is why the stamp bleeds, why
+it sits in a stock's shoulder, and why the pass is short. And it is held up by a
+position in `registeredPasses`.
+
+`tests/unit/pass-positions.test.ts` asserts that position, and asserting the
+position is not the same as asserting what the position buys. A refactor that
+moved the stamp into the grade stage would fail that unit test, somebody would
+update the constraint to match, and every other test here would stay green while
+the stamp quietly became a caption.
+
+So `tests/golden/date-stamp.spec.ts` measures the consequence instead. The
+population is defined from the render rather than from the geometry: a pixel the
+**unhalated** stamp left bit-identical to the no-stamp baseline is a pixel no
+segment covers, so the only light that can reach it is scattered light.
+
+| | unlit pixels near the stamp that halation raised |
+|---|---|
+| stamp before halation, as built | **3921 of 4958 — 79.1%** |
+| stamp moved after halation and the curves | **0 of 4958** |
+
+Watched, by moving it. The two halves are asserted differently on purpose: the
+"raised" half has a tolerance, and the "not raised" half is **exact**, because it
+is the same population the ring was defined by.
+
+### Three mutations, and what each one took
+
+| mutation | caught by | reading |
+|---|---|---|
+| injected after halation and the curves | `date-stamp.spec.ts` | 79.1% to 0% |
+| position from the buffer, not `uSourceRect` | `lens.spec.ts` tiling | 4.0e-1 against a 1.7e-2 tolerance |
+| cap height divided by the buffer | `lens.spec.ts` tiling | 3.1e-1 against the same |
+
+The third is worth a note. An export tile has a **different resolution** from the
+whole frame even when both render at the same scale, so the tiling harness does
+see a size expressed against `uResolution` — which is why the stamp needs no case
+in `two-resolution.spec.ts`, and the file says so where the case would be.
+
+### A two-resolution case here would point the wrong way
+
+Recorded because it is the gamut fixture's failure in a new place, and the
+temptation to add the case is obvious.
+
+The stamp's antialiasing is `fwidth`, one **buffer** pixel wide at every scale.
+That is what keeps the glyph crisp on a 6000-pixel export and a 2048-pixel proxy
+alike — and it means two resolutions disagree along every edge *when the shader
+is correct*. Replace `fwidth` with a constant in cap heights, which is the real
+mistake such a case would be written to catch, and the softness becomes a fixed
+fraction of the frame, so the two resolutions agree **more** closely. The case
+would pass more comfortably with the bug than without it.
+
+Flagged as reasoned rather than watched: confirming it means building the
+misleading case in order to watch it mislead.
+
+### The resolution floor took three metrics, and two of them measured nothing
+
+The brief asked where the segments stop resolving, in the same terms as the grain
+divergence. Getting a number was easy and getting an honest one was not.
+
+1. **Peak pixel, through the normal display path.** Read 100% at every size down
+   to a 40-pixel buffer, where a segment is a ninth of a pixel across. Not the
+   stamp surviving — the metric saturating: the display pass clamps at 1.0 and
+   the stamp's radiance is 4.0, so half the coverage still clipped to white. **It
+   passed its own assertion while doing it.**
+2. **Resolved fraction** — how much of the stamp's box reaches half the full
+   radiance. Read 24, 18, 36, 22, 0 percent down the sizes, *rising* at a buffer
+   four times coarser than full. Blurring does not dim adjacent segments, it
+   merges them: two bars a gap apart become one wider bar that still clears the
+   bar. So it measures whether light survived, which it does, and not whether
+   structure did.
+3. **Peak pixel on the identity display path**, decoded back through the sRGB
+   transfer function. Moves, and for the right reason.
+
+The decode is not decoration. `identity` leaves the matrix into display
+primaries and the sRGB encode — verified rather than assumed: the full-resolution
+peak reads 2.172, and encoding the AP1-to-sRGB red row applied to
+`4 * [1, 0.32, 0.12]` gives 2.1684. The encode is a power function, so half the
+coverage would read as 74% of the peak and a floor defined on it would be a
+statement about sRGB.
+
+Even then the statistic is phase-noisy in the middle — the brightest single pixel
+depends on whether a pixel centre lands on a segment centre, and it read 100, 85,
+100, 67, 47 percent down the sizes. So the assertion is on the ends, and the
+middle is printed rather than trusted.
+
+| | |
+|---|---|
+| one buffer pixel per segment | **350px** on the long edge |
+| segment at the 2048px interactive proxy | **5.8px** |
+
+The conclusion is the useful part: unlike grain, this is **not** a parameter that
+has to be judged in the 1:1 inspector. The floor is below any buffer the renderer
+uses, the drag proxy included.
+
+### The asset class was not built, and borders are no cheaper
+
+The pass was expected to be the first with a texture input not derived from the
+source, and `CLAUDE.md` §3b carried that expectation as a cost already paid
+toward frame borders. It was not.
+
+Seven-segment glyphs are seven axis-aligned boxes, so the distance field is
+analytic and exact at any scale. The decisive argument is not that, though — it
+is that export runs in a worker with its own GL context, so an asset needs a
+second load-and-upload path that has to agree with the main thread's, and a
+preview that disagrees with an export is the one deviation this project already
+apologises for. The curve pass's baked lookup table is not a precedent: it is a
+pure function of `EditState.toneCurve`, where an asset is a third argument to a
+function §2 insists has two.
+
+The three consequences the brief asked to be recorded are recorded as negatives,
+in `src/render/passes/dateStamp.ts`: `variantKey` stays `'default'` because the
+date is a uniform, nothing loads, and no texture unit is claimed. §3b is
+corrected rather than updated — a stale cost estimate in the optimistic direction
+is worse than none.
+
+### A corner-gap assertion caught a fused digit before anyone looked
+
+The verticals were first written to run from the centre of one horizontal bar to
+the centre of the next. They should stop at the far edge. Centre to centre makes
+the upper vertical reach halfway into the top bar, so `a` and `f` fuse into a
+solid L and the digit reads as an outline rather than as segments.
+
+Nothing about the numbers looked wrong, no agreement test could see it, and the
+picture would have had to be looked at closely by someone who knew what a
+seven-segment display is supposed to look like. What caught it was asserting the
+property directly: every pair of segments that meets at a corner has a positive
+gap between them.
+
+The same file also parses `lib/dateStamp.glsl` and compares all forty-two segment
+literals and ten digit masks against the TypeScript they were derived from. A
+wrong one there produces no wrong colour and no failed agreement — it produces a
+digit with a segment in the wrong place, which every other test passes happily.
+
+### What it looks like, and the one thing that decides it
+
+Rendered onto the committed photograph through a stock with halation, with and
+without.
+
+**Without halation** the digits are flat, hard-edged and uniformly pale. They
+read as type composited onto a photograph — nothing about them interacts with the
+image.
+
+**With halation** the cores blow out, the edges soften, and each segment carries
+an orange halo. It reads as light that was recorded.
+
+That is the entire difference, it is the thing the injection point buys, and it
+is visible side by side rather than inferred. At the default strength of 4 the
+bleed closes the gaps between the year, month and day groups when magnified —
+which is what a real one does, and at viewing size `'96 07 04` still reads as
+three groups. A strength of 1.6 gives a truer orange and a thinner glyph, still
+bleeding, and is the other legitimate look.
+
+Sizing and position were left as found: at the default the run sits in the
+bottom-right corner at about 14% of the long edge, which is where and roughly
+what size a date back prints.
 
 ## A duplicated guard does not inherit the original's fixes
 

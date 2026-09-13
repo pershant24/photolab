@@ -299,7 +299,9 @@ Three things it needs, and the third is why it is deferred:
 
 1. A new stage after display, added structurally with its position asserted.
 2. A texture input not derived from the source — a new asset class. *The date
-   stamp needs this too, so deferring borders does not defer it.*
+   stamp was expected to need this too, so deferring borders was expected not to
+   defer it. **It did not need it, and the asset class was not built.** The
+   correction is below.*
 3. **Export over a region with no source pixel.** If the border extends the
    frame, output dimensions exceed source dimensions, and export tiles are
    defined over the source rect. That is a real change to the tiling model, and
@@ -313,6 +315,33 @@ cost is concentrated in (3), which buys nothing else.
 The alternative that avoids (3) entirely is a border drawn *inside* the frame,
 cropping the photograph. No dimension change and no export problem, and less
 faithful. If borders are ever wanted cheaply, that is the version to build.
+
+### The date stamp did not build (2), and the estimate above still stands
+
+Worth recording precisely, because the tempting update after shipping the stamp
+is "the asset class exists now, so borders are cheaper", and that would be
+false. **Borders still need all three.**
+
+The stamp draws seven-segment glyphs from an analytic signed distance field —
+seven axis-aligned boxes per digit, evaluated exactly at any scale — so no
+texture is loaded and no asset machinery was written. Two reasons, and the
+second is the one that generalises:
+
+- An atlas has a resolution and the glyphs do not, so an atlas could only be
+  softer on a 6000-pixel export than the arithmetic is.
+- §2 says the renderer is `render(sourceImage, EditState)`. The curve pass's
+  baked lookup table is **not** a counterexample — it is a pure function of
+  `EditState.toneCurve`. An external asset is a **third argument**, and since
+  export runs in a worker with its own GL context it would need a second
+  load-and-upload path that had to agree with the main thread's. Preview and
+  export disagreeing is the one deviation this project already carries an
+  apology for, at §2. A row of digits did not justify a second.
+
+A border is a photograph of a paper edge. It cannot be an SDF, so the argument
+does not transfer and nothing here has been paid forward. The consequences that
+were to be recorded are recorded as negatives, in
+`src/render/passes/dateStamp.ts`: no cache key change, no loading, no texture
+unit claimed.
 
 ---
 
