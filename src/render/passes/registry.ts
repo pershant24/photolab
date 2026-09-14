@@ -22,6 +22,7 @@ import { graduatedPass } from './graduated'
 import { grainPass } from './grain'
 import { dateStampPass } from './dateStamp'
 import { lightLeakPass } from './lightLeak'
+import { monochromePass } from './monochrome'
 import { HALATION_PASSES } from './halation'
 import { hslPass } from './hsl'
 import { imageSourcePass } from './imageSource'
@@ -87,6 +88,11 @@ export function registeredPasses(curvePass: Pass, filmCurvesPass: Pass): readonl
     // requirement. Position asserted in tests/unit/pass-positions.test.ts.
     dateStampPass,
     ...HALATION_PASSES,
+    // The channel mixer after halation and before the curves. After, because
+    // halation is light and the emulsion records scattered light through the
+    // same spectral sensitivity as everything else — a mixer running earlier
+    // would leave a warm halo on a black and white frame.
+    monochromePass,
     filmCurvesPass,
     // Grain last inside the film stage, and registration order is what decides
     // that: its magnitude depends on the developed density, which does not

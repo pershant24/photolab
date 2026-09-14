@@ -147,9 +147,17 @@ export const CAMERA_PRESETS: readonly AxisPreset[] = [
 /**
  * The stock axis: how the emulsion responded.
  *
- * The three characteristic-curve sets already in `filmStock.ts` are this axis,
- * plus the two things that are properties of the film rather than of the camera
- * — how much it halates, and how much grain it carries at its speed.
+ * The characteristic-curve sets in `filmStock.ts` are this axis, plus the things
+ * that are properties of the film rather than of the camera — how much it
+ * halates, how much grain it carries at its speed, and for a black and white
+ * emulsion which wavelengths it is sensitive to.
+ *
+ * # Three families, and the mixer weights are a whole family on their own
+ *
+ * Negatives climb and never terminate. Reversal stocks compress their highlights
+ * over about a stop and stop. Monochrome stocks have no crossover at all and are
+ * separated instead by the coloured filter their weights stand in for — which is
+ * why three of them need only three curve sets and no colour decisions.
  */
 /*
  * None of these declares `filmStrength`, and that is deliberate rather than an
@@ -176,19 +184,24 @@ export const STOCK_PRESETS: readonly AxisPreset[] = [
     },
   },
   {
-    id: 'stock-punchy-reversal',
-    name: 'Punchy reversal',
+    id: 'stock-punchy-negative',
+    name: 'Punchy negative',
     axis: 'stock',
     builtIn: true,
     patch: {
-      ...stockPatch('punchy-reversal'),
+      ...stockPatch('punchy-negative'),
       // Halation is doing the separating here, and deliberately. At full film
       // strength the three stocks' characteristic curves still measured only 6
       // apart at p90 on the test frame: the crossover between them is real but
       // gentle, and a midtone-dominated frame barely shows it. Halation is a
       // property of the film base rather than of the curves, so pushing it is
-      // legitimate rather than a workaround -- a reversal stock on a clear base
-      // halates far more than a masked colour negative.
+      // legitimate rather than a workaround -- a stock on a clear base halates
+      // far more than a masked colour negative.
+      //
+      // The comment above said "a reversal stock" when this preset was called
+      // one. It measured as a negative -- still climbing at 90% of its midtone
+      // gamma four stops over grey -- and was renamed rather than reshaped. See
+      // filmStock.ts.
       halationStrength: 0.85,
       halationThreshold: 1.45,
       halationRadius: 0.009,
@@ -205,6 +218,100 @@ export const STOCK_PRESETS: readonly AxisPreset[] = [
     patch: {
       ...stockPatch('muted-documentary'),
       grainStrength: 0.66,
+    },
+  },
+
+  {
+    id: 'stock-vivid-reversal',
+    name: 'Vivid reversal',
+    axis: 'stock',
+    builtIn: true,
+    patch: {
+      ...stockPatch('vivid-reversal'),
+      // Transparency film sits on a clear base with no orange mask, so it
+      // scatters more than any negative here. The threshold is low because a
+      // reversal stock's highlights are already compressed into a narrow band
+      // near the top, so there is little above 2.2 stops left to catch.
+      halationStrength: 0.7,
+      halationThreshold: 1.6,
+      // No halationRadius: 0.006 is the default, and `sanitisePatch` drops any
+      // value equal to one. Stating it would have been a key that said nothing,
+      // which the shipped-preset assertion catches and did.
+      // Slow, fine-grained film. The contrast is doing the work, not the grain.
+      grainStrength: 0.14,
+    },
+  },
+  {
+    id: 'stock-cool-reversal',
+    name: 'Cool reversal',
+    axis: 'stock',
+    builtIn: true,
+    patch: {
+      ...stockPatch('cool-reversal'),
+      halationStrength: 0.55,
+      halationThreshold: 1.5,
+      halationRadius: 0.005,
+      grainStrength: 0.18,
+    },
+  },
+
+  /*
+   * The monochrome stocks.
+   *
+   * What separates these is the mixer, not the curves. Weighting red darkens a
+   * blue sky and opens skin, because skin reflects a great deal of red and a
+   * clear sky reflects almost none; weighting blue does the reverse, which is
+   * the look of orthochromatic film and of a lot of reportage.
+   *
+   * Two of these share nothing but that idea, and the third is separated by
+   * contrast instead — so the family spans both of the axes available to it
+   * rather than three points along one.
+   */
+  {
+    id: 'stock-mono-neutral',
+    name: 'Neutral monochrome',
+    axis: 'stock',
+    builtIn: true,
+    patch: {
+      ...stockPatch('mono-panchromatic'),
+      // Close to the eye's own luminance response, so the frame reads the way a
+      // colour photograph of it would if you removed the colour. That is the
+      // reference the other two are departures from.
+      monochromeMix: [0.3, 0.59, 0.11],
+      grainStrength: 0.3,
+      // No halation, and no key for it: a black and white negative has an
+      // anti-halation backing and is the least prone to it of anything here,
+      // and zero is already the default.
+    },
+  },
+  {
+    id: 'stock-mono-red-filter',
+    name: 'Red-filtered monochrome',
+    axis: 'stock',
+    builtIn: true,
+    patch: {
+      ...stockPatch('mono-filtered'),
+      // The deep red filter. Skies go nearly black, foliage darkens, skin and
+      // stone open up — the landscape look, and it is one triple of numbers.
+      monochromeMix: [0.72, 0.24, 0.04],
+      grainStrength: 0.34,
+      // No halation, as above.
+    },
+  },
+  {
+    id: 'stock-mono-hard',
+    name: 'Hard monochrome',
+    axis: 'stock',
+    builtIn: true,
+    patch: {
+      ...stockPatch('mono-hard'),
+      // Weighted the other way, which is what makes this a different picture
+      // rather than the same one with more contrast: skies lighten, skin goes
+      // dark and textured. Orthochromatic response, pushed.
+      monochromeMix: [0.18, 0.46, 0.36],
+      // Pushed film is grainy film, and this is the grainiest stock here.
+      grainStrength: 0.72,
+      // No halation, as above.
     },
   },
 ]
@@ -357,7 +464,7 @@ export const BUNDLES: readonly Bundle[] = [
     id: 'bundle-saturated-slide',
     name: 'Saturated slide',
     builtIn: true,
-    components: ['camera-medium-format', 'stock-punchy-reversal', 'grade-teal-warm'],
+    components: ['camera-medium-format', 'stock-punchy-negative', 'grade-teal-warm'],
     // The stock and the grade both add contrast, and together they overshoot.
     // The trim belongs to this combination rather than to either component.
     override: { contrast: 1.08 },

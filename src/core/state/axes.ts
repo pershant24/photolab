@@ -89,6 +89,9 @@ export const AXIS_PARAMETERS: Record<PresetAxis, readonly string[]> = {
     'halationStrength',
     'halationThreshold',
     'halationRadius',
+    // Panchromatic sensitivity: which wavelengths the emulsion records and how
+    // strongly. A property of the film if anything is.
+    'monochromeMix',
   ],
   grade: [
     'toneCurve',

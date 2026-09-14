@@ -16,7 +16,13 @@
 
 import grainSource from '../shaders/grain.frag'
 
-import { GRAIN_CHANNEL_SIZES } from '../../core/colour/grain'
+import {
+  GRAIN_CHANNEL_SEEDS,
+  GRAIN_CHANNEL_SIZES,
+  MONOCHROME_GRAIN_SEEDS,
+  MONOCHROME_GRAIN_SIZES,
+} from '../../core/colour/grain'
+import { isMonochrome } from '../../core/colour/monochrome'
 import type { Pass, RenderInput } from './types'
 
 const enabled = (input: RenderInput): boolean =>
@@ -37,14 +43,28 @@ export const grainPass: Pass = {
     const size = locate('uGrainSize')
     if (size) gl.uniform1f(size, input.edit.grainSize)
 
+    /*
+     * One layer or three, decided by the stock rather than by the grain
+     * parameters.
+     *
+     * Colour film has three emulsion layers that develop independently, and
+     * that independence is what makes film grain coloured instead of the
+     * luminance noise a sensor produces. A black and white film has ONE layer,
+     * so equal seeds and equal crystal sizes are not a simplification here —
+     * they are the physics, and three independent fields would put colour into a
+     * photograph that has none.
+     *
+     * Not a foreseen case: it shipped, at a relative channel spread of 1.6e-1
+     * against a tolerance of 1e-3. See `src/core/colour/grain.ts`.
+     */
+    const mono = isMonochrome(input.edit.monochromeMix)
+    const sizes = mono ? MONOCHROME_GRAIN_SIZES : GRAIN_CHANNEL_SIZES
+    const seeds = mono ? MONOCHROME_GRAIN_SEEDS : GRAIN_CHANNEL_SEEDS
+
     const channelSizes = locate('uGrainChannelSizes')
-    if (channelSizes) {
-      gl.uniform3f(
-        channelSizes,
-        GRAIN_CHANNEL_SIZES[0],
-        GRAIN_CHANNEL_SIZES[1],
-        GRAIN_CHANNEL_SIZES[2],
-      )
-    }
+    if (channelSizes) gl.uniform3f(channelSizes, sizes[0], sizes[1], sizes[2])
+
+    const channelSeeds = locate('uGrainSeeds')
+    if (channelSeeds) gl.uniform3f(channelSeeds, seeds[0], seeds[1], seeds[2])
   },
 }

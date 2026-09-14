@@ -242,7 +242,7 @@ test.describe('film stocks', () => {
   })
 
   test('offers every stock, and none is named after a real one', async ({ page }) => {
-    for (const id of ['warm-portrait', 'punchy-reversal', 'muted-documentary']) {
+    for (const id of ['warm-portrait', 'punchy-negative', 'muted-documentary']) {
       await expect(page.getByTestId(`stock-${id}`)).toBeVisible()
     }
   })

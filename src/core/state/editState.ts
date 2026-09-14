@@ -167,6 +167,15 @@ export interface EditState {
   readonly graduatedExposure: number
   readonly graduatedTint: readonly number[]
 
+  /**
+   * Panchromatic sensitivity: the weights the emulsion records each channel at.
+   *
+   * All zeros is the off state — the film is a colour film. Anything else
+   * collapses the frame to one channel in the film stage, before the
+   * characteristic curves. Stock axis, because it is a property of the emulsion.
+   */
+  readonly monochromeMix: readonly number[]
+
   /** How much scattered light to add back. 0 is off. */
   readonly halationStrength: number
 
@@ -724,6 +733,7 @@ export const DEFAULT_EDIT_STATE: EditState = {
   graduatedExposure: 0,
   // A multiply, so one is clear glass. A coloured grad absorbs; it cannot add.
   graduatedTint: [1, 1, 1],
+  monochromeMix: [0, 0, 0],
   halationStrength: 0,
   halationThreshold: 2,
   halationRadius: 0.006,
@@ -867,6 +877,22 @@ const VECTORS: readonly VectorParameter[] = [
     step: 0.01,
     defaultValue: [1, 1, 1],
     identityValue: [1, 1, 1],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'monochromeMix',
+    label: 'Panchromatic mix',
+    length: 3,
+    // Relative weights, normalised before they reach the shader, so only their
+    // ratio matters and the mixer cannot change exposure as a side effect. All
+    // zeros is off; there is no separate switch because a mixer taking nothing
+    // from any channel has no meaning to express.
+    min: 0,
+    max: 1,
+    step: 0.01,
+    defaultValue: [0, 0, 0],
+    identityValue: [0, 0, 0],
     components: ['Red', 'Green', 'Blue'],
   },
   {

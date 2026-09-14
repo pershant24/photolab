@@ -9,18 +9,29 @@ in raw WebGL2: no backend, no account, no upload.
 
 ## What it looks like
 
-One photograph through the three film stocks that ship, and nothing else — no
-camera, no grade. Each stock is three independent characteristic curves, one per
-channel with its own toe, shoulder and gamma, plus the two things that belong to
-an emulsion rather than to a lens: how much it halates, and how much grain it
-carries.
+One photograph through three of the eight film stocks that ship — one from each
+family — and nothing else: no camera, no grade. Each stock is three independent
+characteristic curves, one per channel with its own toe, shoulder and gamma, plus
+the things that belong to an emulsion rather than to a lens: how much it halates,
+how much grain it carries, and for a black and white stock which wavelengths it
+is sensitive to.
 
 | | |
 |---|---|
 | **Original** | **Warm portrait negative** |
 | ![](docs/images/original.jpg) | ![](docs/images/warm-portrait.jpg) |
-| **Punchy reversal** | **Muted documentary** |
-| ![](docs/images/punchy-reversal.jpg) | ![](docs/images/muted-documentary.jpg) |
+| **Vivid reversal** | **Red-filtered monochrome** |
+| ![](docs/images/vivid-reversal.jpg) | ![](docs/images/mono-red-filter.jpg) |
+
+The three families are not three tunings of one idea, and the difference is
+measured rather than asserted. **A negative keeps climbing**: four stops over
+middle grey it is still gaining density at 90% of its midtone slope, and its
+highlights roll off asymptotically for as long as you can expose it. **Reversal
+terminates**: its slope dies within about 1.3 stops of leaving the straight
+section, which is why the sky above goes to paper white rather than softening.
+Contrast does not distinguish them — a high-gamma negative looks punchy and still
+never terminates — which is how a stock shipped here called "punchy reversal"
+while measuring as a negative, until something measured it.
 
 These are rendered from the shipping preset definitions by
 `tests/render/readme-images.spec.ts`, which also fails if they drift out of date

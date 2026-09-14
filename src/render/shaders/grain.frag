@@ -22,6 +22,15 @@ uniform float uGrainStrength;
 uniform float uGrainSize;
 /** Per-channel period multipliers: the three layers differ in crystal size. */
 uniform vec3 uGrainChannelSizes;
+/**
+ * Per-channel noise seeds.
+ *
+ * A uniform rather than three literals, because a MONOCHROME emulsion has one
+ * layer and must therefore have one grain field. The pass binds three distinct
+ * seeds for a colour stock and three equal ones for a black and white stock —
+ * see src/render/passes/grain.ts.
+ */
+uniform vec3 uGrainSeeds;
 
 in vec2 vTexCoord;
 out vec4 fragColour;
@@ -59,9 +68,9 @@ void main() {
     float basePeriod = uGrainSize * max(uImageSize.x, uImageSize.y);
 
     fragColour = vec4(
-        grainChannel(acescg.r, sourcePixel, basePeriod, uGrainChannelSizes.r, bufferScale, 0.0),
-        grainChannel(acescg.g, sourcePixel, basePeriod, uGrainChannelSizes.g, bufferScale, 17.0),
-        grainChannel(acescg.b, sourcePixel, basePeriod, uGrainChannelSizes.b, bufferScale, 41.0),
+        grainChannel(acescg.r, sourcePixel, basePeriod, uGrainChannelSizes.r, bufferScale, uGrainSeeds.r),
+        grainChannel(acescg.g, sourcePixel, basePeriod, uGrainChannelSizes.g, bufferScale, uGrainSeeds.g),
+        grainChannel(acescg.b, sourcePixel, basePeriod, uGrainChannelSizes.b, bufferScale, uGrainSeeds.b),
         1.0
     );
 }

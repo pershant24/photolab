@@ -93,6 +93,9 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'halationBlurH',
     'halationBlurV',
     'halationComposite',
+    // The channel mixer: after halation, because scattered light is recorded
+    // through the same spectral sensitivity as everything else.
+    'monochrome',
     'filmCurves',
     // Grain after the curves: its magnitude depends on the developed density,
     // which does not exist until they have produced it.
@@ -112,7 +115,7 @@ test('a parameter change updates uniforms; only a variant change compiles', asyn
     'display',
   ])
 
-  // Three of the twenty-five passes run at the default edit: imageSource is
+  // Three of the twenty-six passes run at the default edit: imageSource is
   // disabled with no image, halation is off, and white balance, exposure, the
   // film curves, the tone curve and contrast are all at their identity values.
   // The light leak and the date stamp are both off at a strength of zero, which
