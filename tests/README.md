@@ -2803,6 +2803,84 @@ repository, so the numbers above are curve measurements and the only frame these
 were looked at on is the single landscape. Skin is where crossover most obviously
 succeeds or fails, and none of these eight stocks has been judged on any.
 
+## The lint gate was order dependent
+
+### The premise was wrong, and it was mine
+
+It was reported as "`npx eslint .` flags `src/render/gl/context.ts` on a clean
+tree locally while CI passes, so local lint is not the gate CI runs." That was
+false. `npm run lint` is `eslint .` in both places, the installed versions of
+`typescript`, `typescript-eslint` and `eslint` match the lockfile exactly, and
+**`npm run lint` passed locally, the same as CI.** What failed was linting that
+file *on its own*. There was only ever one gate; the question worth answering was
+why its verdict depended on how it was invoked.
+
+### What the verdict depended on
+
+Bisected, with every run repeated to rule out flakiness:
+
+| invocation | exit |
+|---|---|
+| `eslint src/render/gl/context.ts` | 1 — cast flagged as unnecessary |
+| `eslint src/render/gl` | 1 |
+| `eslint src/render` | 0 |
+| `eslint src` | 0 |
+| `eslint .` — the gate | **0** |
+| `gl` + `decode.worker.ts` | 1 |
+| `gl` + `export.worker.ts` | **0** |
+| `context.ts` then `export.worker.ts` | 1 |
+| `export.worker.ts` then `context.ts` | **0** |
+
+**The same two files, in the same configuration, gave opposite results by order.**
+`eslint .` reaches `src/render/export.worker.ts` before
+`src/render/gl/context.ts`, so the gate took the order that hid the finding.
+
+### The cast was covering an unresolved type, not narrowing a union
+
+The comment on `canvas.getContext('webgl2', …) as WebGL2RenderingContext | null`
+said `OffscreenCanvas.getContext` returned a union of every context kind. The
+compiler API says otherwise: on the full 162-file program **and** on that file
+alone, TypeScript 5.9.3 resolves the call to `WebGL2RenderingContext | null`, and
+lib.dom carries a literal `"webgl2"` overload on both canvas types.
+
+So the cast looked unnecessary, and was removed. **That made the gate fail.**
+With `export.worker.ts` linted first, typescript-eslint typed `gl` as an *error
+type* and flagged nine unsafe calls on it. The cast had been supplying a type
+where the lint program had none — which is also why "unnecessary" flipped with
+order: in one order the call resolved and the cast changed nothing, in the other
+it did not resolve and the cast was the only type there was.
+
+Removing the cast and calling the result verified was one step short. It was
+checked in both orders only because the first probe had established that order
+mattered — **a fix verified in the order that passes is not verified.**
+
+### The fix, and what is not understood
+
+`getContext` is now called on a concrete type in each branch of an `in` check,
+rather than on the union. That takes union overload resolution out of the
+question. Verified in every invocation above, all exit 0, plus `tsc`, the unit
+suite, and the browser specs covering both the `OffscreenCanvas` branch (export
+worker) and the `HTMLCanvasElement` branch.
+
+**Why** typescript-eslint's project service resolves the union call differently
+depending on which file it met first is **not understood**. A plain
+`ts.createProgram` over the same files does not reproduce it. It is recorded as
+unexplained rather than given a mechanism, because the plausible one — some
+state built while checking the worker's call site being reused for this file — is
+a guess, and this repository has paid for guesses written down as causes.
+
+### Why this matters beyond one cast
+
+A type-aware lint rule that can be silenced by the order files are visited in is a
+gate whose **silence is not evidence**. It is the same end state as the checks that
+passed by not running, reached by a new route: this one ran on every file and still
+reported nothing, because of what it had looked at first.
+
+It is not closed as a class. This fixes the instance that was found. A second
+order-dependent verdict elsewhere would still be silent under `eslint .`. Running
+the linter a second time over a reversed file list and failing if the two disagree
+would catch the class; it is not built, because nothing yet says it recurs.
+
 ## A duplicated guard does not inherit the original's fixes
 
 The trademark check existed in `presets.test.ts`, word-bounded, carrying a

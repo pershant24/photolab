@@ -105,10 +105,36 @@ const NO_WEBGL2_MESSAGE =
  * says it cannot run.
  */
 export function createRenderContext(canvas: RenderSurface): RenderContext {
-  // Cast because `OffscreenCanvas.getContext` is typed as returning a union of
-  // every context kind rather than being narrowed by the literal, unlike
-  // `HTMLCanvasElement.getContext`. The null check below is the real guard.
-  const gl = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES) as WebGL2RenderingContext | null
+  /*
+   * The canvas is narrowed BEFORE `getContext` is called, and the two branches
+   * are textually identical on purpose. Do not merge them.
+   *
+   * There used to be one call on the `HTMLCanvasElement | OffscreenCanvas` union,
+   * followed by `as WebGL2RenderingContext | null`. The comment on it said the
+   * cast narrowed a union return type. It did not. The TypeScript compiler
+   * resolves that call to `WebGL2RenderingContext | null` either way — checked
+   * through the compiler API on the full program and on this file alone.
+   *
+   * What the cast actually did was cover a type-aware lint program that, in one
+   * file order, **could not resolve the call at all**. With `export.worker.ts`
+   * linted before this file, typescript-eslint typed `gl` as an error type and
+   * flagged nine unsafe calls below; with this file first, it resolved the call
+   * and flagged the cast as unnecessary instead. `eslint .` reaches the worker
+   * first, so the one lint gate — the same command locally and in CI — reported
+   * nothing, and a single-file run reported the opposite.
+   *
+   * Calling `getContext` on a concrete type in each branch removes the union
+   * overload resolution from the question. Narrowed with an `in` check rather
+   * than `instanceof`, so no branch references a global that a given context
+   * might not define. That this removes the order dependence is verified; WHY
+   * typescript-eslint resolves the union call differently by file order is not
+   * understood, and tests/README.md records it as unexplained rather than as a
+   * mechanism.
+   */
+  const gl =
+    'transferToImageBitmap' in canvas
+      ? canvas.getContext('webgl2', CONTEXT_ATTRIBUTES)
+      : canvas.getContext('webgl2', CONTEXT_ATTRIBUTES)
   if (!gl) {
     throw new RendererUnsupportedError(NO_WEBGL2_MESSAGE, 'getContext("webgl2") returned null')
   }
