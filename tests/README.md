@@ -2456,6 +2456,118 @@ Sizing and position were left as found: at the default the run sits in the
 bottom-right corner at about 14% of the long edge, which is where and roughly
 what size a date back prints.
 
+## The graduated filter, and a test that broke its neighbours
+
+### It is in the grade stage, which is a choice with a measurable consequence
+
+A photographer's graduated filter is glass in front of the lens. The physical
+ordering this project is built on would put it in the **lens** stage, where its
+darkening would pass through the characteristic curves exactly as the vignette's
+does — and the vignette is measured for precisely that: a corner-to-centre ratio
+of 0.52, 0.59 and 0.66 through the three stocks, a 15% spread from a control that
+never touched them.
+
+This one is in the **grade** stage, as the digital tool: the local exposure
+decision a colourist makes on a developed image. The consequence is the opposite
+of the vignette's and is worth stating rather than discovering. **It does not
+vary by stock.** If the glass-filter behaviour is wanted it is a second pass in
+the lens stage, not a switch on this one.
+
+### Exposure is a linear multiply, and the reason is not where you would look
+
+The grade passes read as though they work in ACEScct — contrast pivots there, the
+wheels offset there — but each one encodes, operates and decodes internally.
+**The buffer between them is linear ACEScg.** So a shift of `s` stops is `* 2^s`.
+
+The plausible alternative is adding `s / 17.52` in ACEScct, which is exactly a
+stop shift *above* the log/linear break at 0.0078125 — 4.5 stops under middle
+grey — and is not one below it. That is exactly the deep shadow a grad is used to
+open up, and it would have been wrong quietly.
+
+### The support function, not the diagonal
+
+`position` has to mean the same fraction of the frame at every angle. That needs
+the rectangle's extent along the gradient normal, `|n.x|·w + |n.y|·h`, and not
+its diagonal.
+
+Watched: substituting the diagonal makes a horizontal grad on a 3:2 frame reach
+0.777 instead of 1, so `position: 1` would leave a fifth of the frame untouched
+and the parameter would mean something different at every angle. The assertion is
+written as the property — the coordinate reaches exactly 0 at one corner and
+exactly 1 at another — swept over 120 angles and three frame shapes, because the
+diagonal happens to be right at one angle on each shape.
+
+### The agreement test, and what makes it non-circular
+
+The mask is a function of position, so the shader evaluates it per pixel and the
+maths is genuinely written twice. With a tint of one the filter is exactly
+`rgb * 2^(stops · mask)`, so the ratio of a graded render to an ungraded one
+gives the mask back:
+
+    mask = log2(withFilter / without) / stops
+
+The measurement never calls the shader's mask function — it reads pixels and
+divides — and the expected value comes from the TypeScript at the same frame
+position, so a disagreement names the geometry rather than a colour.
+
+| angle | worst disagreement | samples in the transition band |
+|---|---|---|
+| 0 | 5.9e-4 | 3000 |
+| 90 | 7.3e-4 | 4240 |
+| 37 | 1.1e-3 | 2691 |
+| 214 | 1.1e-3 | 8655 |
+| 300 | 8.9e-4 | 235 |
+
+The band count is the non-vacuity guard that matters here, and it is not the
+obvious one. Agreement over a mask that is flat 0 and flat 1 compares two
+constants; **the transition band is the only part where the geometry is under
+test at all**, so it is counted before the agreement is believed.
+
+The 5e-3 tolerance is derived: RGBA16F carries about 2^-10 relative error per
+leg, and through `log2(·)/2` that is roughly 7e-4 on the mask. The measurements
+land on that figure, which is the check that the derivation described the right
+noise.
+
+### Bit-exact outside the band, and the mutation that shows why it matters
+
+`exp2(0)` is exactly 1 and `mix(vec3(1), tint, 0)` is exactly 1, so a pixel the
+mask does not reach is returned unchanged — the vignette's guarantee, by the same
+construction.
+
+It matters more than it looks. A grad normally acts on part of the frame and
+leaves the rest alone, so "the rest" is most of the picture. Watched: replacing
+the smoothstep with a logistic falloff — smooth, plausible, and never exactly
+zero — put a cast on **8160 of 53,760** pixels that should not have been touched,
+at every setting, for as long as the filter was enabled.
+
+Both counts are asserted, because either alone is satisfiable by a pass that did
+nothing: 53,760 pixels outside the band to be exact over, and 99,360 inside it
+that moved.
+
+### A slow test is not only slow
+
+The first version of that check called `expect` once per channel per unmasked
+pixel: 161,000 assertions. It passed.
+
+It also took six minutes and **took the page down with it** — the five agreement
+tests in the same file then failed in 150ms each, with the renderer gone. They
+had passed moments earlier and passed again in isolation, which is the confusing
+shape this kind of failure has.
+
+Counted into a total and asserted once, the same check runs in three seconds and
+the file went from 6.3 minutes to 10 seconds. **At this scale a slow assertion is
+not a performance question, it is a correctness question about its neighbours.**
+
+### The seam is placed on the gradient, not the gradient on the seam
+
+`lens.spec.ts` splits at (400, 300) and shares that split with every case, so the
+grad is what moves. Unrotated, the coordinate runs 1 at the top to 0 at the
+bottom, so the horizontal seam at y = 300 of 360 sits at a coordinate of
+1 − 300/360 = 0.167. A position of 0.167 puts the steepest part of the gradient
+along the seam, which is where a position error shows; a flat region would hide
+one. Watched: reading the gradient from the buffer instead of the frame gives
+3.4e-1 against a 1.8e-2 tolerance.
+
 ## A duplicated guard does not inherit the original's fixes
 
 The trademark check existed in `presets.test.ts`, word-bounded, carrying a

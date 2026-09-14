@@ -105,6 +105,17 @@ export const AXIS_PARAMETERS: Record<PresetAxis, readonly string[]> = {
     // A look decision about how highlights roll off, not a property of the
     // scene, so it sits with the colourist rather than outside the axes.
     'toneMapKnee',
+    // The graduated filter. On the grade axis rather than the camera axis
+    // despite a real one being glass on the lens, because this is the digital
+    // tool: a local exposure decision on a developed image. It is in the grade
+    // STAGE too, which makes it the rare case where the axis and the stage
+    // agree — and that agreement is a coincidence, not the rule the table is
+    // written against.
+    'graduatedAngle',
+    'graduatedPosition',
+    'graduatedWidth',
+    'graduatedExposure',
+    'graduatedTint',
   ],
 }
 

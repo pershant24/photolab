@@ -156,6 +156,17 @@ export interface EditState {
 
   readonly vignette: number
 
+  /**
+   * The graduated filter: a linear gradient carrying exposure and a colour
+   * shift. Grade axis, grade stage — the digital tool rather than glass on the
+   * lens, so unlike the vignette it does not pass through the film curves.
+   */
+  readonly graduatedAngle: number
+  readonly graduatedPosition: number
+  readonly graduatedWidth: number
+  readonly graduatedExposure: number
+  readonly graduatedTint: readonly number[]
+
   /** How much scattered light to add back. 0 is off. */
   readonly halationStrength: number
 
@@ -492,6 +503,58 @@ const SCALARS: readonly ScalarParameter[] = [
   },
   {
     kind: 'scalar',
+    key: 'graduatedAngle',
+    label: 'Grad angle',
+    // Degrees clockwise from the top of the frame. Zero darkens the sky, which
+    // is what a graduated filter is mostly bought for.
+    min: 0,
+    max: 360,
+    step: 1,
+    defaultValue: 0,
+    unit: 'deg',
+  },
+  {
+    kind: 'scalar',
+    key: 'graduatedPosition',
+    label: 'Grad position',
+    // Where the centre of the transition sits along the gradient, as a fraction
+    // of the frame measured in the gradient's own direction. One parameter and
+    // not two, for the reason the light leak's position is one: the line has a
+    // single degree of freedom once its angle is fixed, and a second coordinate
+    // would only slide it along itself.
+    min: 0,
+    max: 1,
+    step: 0.005,
+    defaultValue: 0.5,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'graduatedWidth',
+    label: 'Grad softness',
+    // The transition band. The floor is not zero because `smoothstep` with
+    // equal edges is undefined rather than hard — see GRADUATED_MIN_WIDTH.
+    min: 0.01,
+    max: 1,
+    step: 0.005,
+    defaultValue: 0.35,
+    unit: '',
+  },
+  {
+    kind: 'scalar',
+    key: 'graduatedExposure',
+    label: 'Grad exposure',
+    // Stops, applied as a linear multiply. Four either way covers a filter far
+    // stronger than any glass sold, and the pass is skipped at zero.
+    min: -4,
+    max: 4,
+    step: 0.05,
+    defaultValue: 0,
+    unit: 'EV',
+    identityValue: 0,
+  },
+  {
+    kind: 'scalar',
     key: 'halationStrength',
     label: 'Halation',
     min: 0,
@@ -655,6 +718,12 @@ export const DEFAULT_EDIT_STATE: EditState = {
   dateStampMonth: 1,
   dateStampDay: 1,
   vignette: 0,
+  graduatedAngle: 0,
+  graduatedPosition: 0.5,
+  graduatedWidth: 0.35,
+  graduatedExposure: 0,
+  // A multiply, so one is clear glass. A coloured grad absorbs; it cannot add.
+  graduatedTint: [1, 1, 1],
   halationStrength: 0,
   halationThreshold: 2,
   halationRadius: 0.006,
@@ -783,6 +852,21 @@ const VECTORS: readonly VectorParameter[] = [
     defaultValue: [1, 0.32, 0.12],
     // As above: the colour has no identity, the strength does.
     identityValue: [1, 0.32, 0.12],
+    components: ['Red', 'Green', 'Blue'],
+  },
+  {
+    kind: 'vector',
+    key: 'graduatedTint',
+    label: 'Grad colour',
+    length: 3,
+    // A multiplier per channel, so 1 is clear and below 1 absorbs. Above 1 is
+    // allowed and is not physical — it is the digital tool, and refusing it
+    // would make a warming grad impossible without also raising exposure.
+    min: 0,
+    max: 2,
+    step: 0.01,
+    defaultValue: [1, 1, 1],
+    identityValue: [1, 1, 1],
     components: ['Red', 'Green', 'Blue'],
   },
   {

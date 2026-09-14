@@ -27,6 +27,7 @@ import {
   TICK_CENTRE,
   TICK_HALF,
 } from '../../src/core/colour/dateStamp'
+import { GRADUATED_MIN_WIDTH } from '../../src/core/colour/graduated'
 import type { Mat3 } from '../../src/core/colour/types'
 
 /**
@@ -47,6 +48,7 @@ const read = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`../../src/render/shaders/lib/${name}`, import.meta.url)), 'utf8')
 
 const SOURCE = read('colour.glsl')
+const GRADUATED_SOURCE = read('graduated.glsl')
 const DATE_STAMP_SOURCE = read('dateStamp.glsl')
 
 function glslFloat(name: string): number {
@@ -197,5 +199,20 @@ describe('the seven-segment geometry matches its TypeScript source', () => {
       .filter((part) => part.length > 0)
       .map(Number)
     expect(masks).toEqual([...DIGIT_SEGMENTS])
+  })
+})
+
+describe('the graduated filter shares its one constant', () => {
+  it('GRADUATED_MIN_WIDTH', () => {
+    // The rest of the filter's geometry is duplicated maths rather than
+    // duplicated numbers — it is a function of position, so the shader has to
+    // evaluate it — and `tests/golden/graduated.spec.ts` compares the two
+    // implementations across a ramp. This is the one literal, and it decides
+    // whether `smoothstep` is ever called with equal edges.
+    const match = /const\s+float\s+GRADUATED_MIN_WIDTH\s*=\s*(-?[0-9.eE+-]+)\s*;/.exec(
+      GRADUATED_SOURCE,
+    )
+    expect(match?.[1], 'graduated.glsl has no GRADUATED_MIN_WIDTH').toBeTruthy()
+    expect(Number(match![1])).toBe(GRADUATED_MIN_WIDTH)
   })
 })

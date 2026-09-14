@@ -79,7 +79,7 @@ const SETUP = `async (source) => {
 
 const OFF = {
   distortion: 0, aberration: 0, diffusionStrength: 0, vignette: 0, microcontrast: 0,
-  lightLeakStrength: 0, dateStampStrength: 0,
+  lightLeakStrength: 0, dateStampStrength: 0, graduatedExposure: 0,
   halationStrength: 0, grainStrength: 0, filmStrength: 0, exposure: 0, contrast: 1,
 }
 
@@ -112,6 +112,28 @@ const CASES = {
     dateStampYear: 1988,
     dateStampMonth: 8,
     dateStampDay: 8,
+  },
+  /*
+   * The graduated filter, with its band placed ON the seam rather than the seam
+   * placed conveniently.
+   *
+   * The split is fixed at (400, 300) and shared with every case here, so the
+   * gradient is what moves. Unrotated, the coordinate runs 1 at the top of the
+   * frame to 0 at the bottom, and the horizontal seam at y = 300 of 360 sits at
+   * a coordinate of 1 - 300/360 = 0.167. A position of 0.167 therefore puts the
+   * STEEPEST part of the gradient exactly along the seam, which is where a
+   * position error shows and where a flat region would hide one.
+   *
+   * A narrow band for the same reason: at width 0.2 the transition occupies a
+   * tenth of the frame around the seam, so the two legs are being compared where
+   * the mask is changing fastest rather than where it is pinned at 0 or 1.
+   */
+  graduated: {
+    ...OFF,
+    graduatedAngle: 0,
+    graduatedPosition: 0.167,
+    graduatedWidth: 0.2,
+    graduatedExposure: -1.5,
   },
   everything: {
     ...OFF, distortion: -0.12, aberration: 0.005,
